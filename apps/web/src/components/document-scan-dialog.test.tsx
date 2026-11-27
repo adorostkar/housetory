@@ -388,9 +388,16 @@ describe("DocumentScanDialog", () => {
     vi.mocked(api.post)
       .mockRejectedValueOnce(new Error("network disconnected"))
       .mockResolvedValueOnce(committed);
+    // Details typed before the failed save must still be there for the retry.
+    await userEvent.click(screen.getByRole("button", { name: /Add details/ }));
+    await userEvent.type(screen.getByLabelText(/^Merchant/), "Clas Ohlson");
     await userEvent.click(screen.getByRole("button", { name: "Save scanned document" }));
-    expect(await screen.findByText("network disconnected")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Save scanned document" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The scan is not saved yet. network disconnected",
+    );
+    expect(screen.getByLabelText(/^Merchant/)).toHaveValue("Clas Ohlson");
+    expect(screen.getByAltText("Original page 1")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(3));
     const commits = vi
       .mocked(api.post)
@@ -399,5 +406,26 @@ describe("DocumentScanDialog", () => {
     expect((commits[0]?.[1] as { request_id: string }).request_id).toBe(
       (commits[1]?.[1] as { request_id: string }).request_id,
     );
+    expect(commits[1]?.[1]).toMatchObject({ merchant: "Clas Ohlson" });
+  });
+
+  it("asks before Escape or the close button throws scanned pages away", async () => {
+    const { onOpenChange } = renderDialog();
+    await userEvent.upload(
+      uploadInput(document.body) as HTMLInputElement,
+      new File(["page one"], "receipt-page-1.png", { type: "image/png" }),
+    );
+    await waitFor(() => expect(screen.getByAltText("Original page 1")).toBeVisible());
+    await userEvent.keyboard("{Escape}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("This scan is not saved yet");
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(api.delete).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByAltText("Original page 1")).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Discard scan" }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith("/documents/scans/scan-1"));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

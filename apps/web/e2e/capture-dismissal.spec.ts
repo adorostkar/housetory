@@ -116,10 +116,15 @@ for (const mobile of [false, true]) {
     const dismiss = queue.getByRole("button", { name: `Dismiss review ${title}`, exact: true });
     await openReview.click();
     const review = panel.getByRole("region", { name: "Assistant item review" });
-    // The name is corrected in the row itself.
-    const name = review.getByRole("textbox", { name: /^Name of / });
+    // Tapping the name opens it in the bar at the foot of the assistant.
+    const name = review.getByRole("button", { name: /^Edit name of / });
     await expect(name).toHaveCount(1);
-    await name.fill(`Edited ${title}`);
+    await name.click();
+    const editor = page.getByTestId("bar-editor");
+    await editor.getByRole("textbox", { name: /^Name of / }).fill(`Edited ${title}`);
+    await editor.getByRole("button", { name: "Save name" }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(name).toHaveText(`Edited ${title}`);
     await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
     await dismiss.click();
     await expect(openReview).toHaveCount(0);
@@ -133,7 +138,8 @@ for (const mobile of [false, true]) {
       await page.getByRole("button", { name: "Undo", exact: true }).click();
     }
     await openReview.click();
-    await expect(name).toHaveValue(`Edited ${title}`);
+    // The corrected name is still in the row after the dismissal was undone.
+    await expect(name).toHaveText(`Edited ${title}`);
     await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
     await dismiss.click();
     await expect(openReview).toHaveCount(0);

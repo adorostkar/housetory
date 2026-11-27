@@ -306,8 +306,11 @@ function HierarchyRow({
         style={{ marginLeft: `${depth * 14}px` }}
         className={final ? "opacity-80" : undefined}
         title={proposed.name}
-        titleLabel={`Name of ${entry.proposed.name || "this record"}`}
+        titleLabel={`Name of ${proposed.name || entry.proposed.name || "this record"}`}
         onTitleChange={final ? undefined : (name) => update({ name })}
+        titleValidate={(value) => (value ? null : "Give this record a name.")}
+        quantityValidate={(value) =>
+          /^\d+$/.test(value) && Number(value) <= 1_000_000 ? null : "Enter a whole number, 0 or more."}
         titleError={actions.nameErrors?.[entry.id]}
         quantity={type === "item" || type === "container" ? proposed.quantity : null}
         onQuantityChange={!final && type === "item"

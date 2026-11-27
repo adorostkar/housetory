@@ -174,13 +174,27 @@ export function DocumentUploadDialog({
     notes: details.notes.trim() || null,
   };
 
+  // The chosen items are part of the draft. A failed save keeps the choice; it is
+  // sent again with Retry or on the way out.
+  const savedItemIds = saved ? saved.items.map((item) => item.id) : [];
+  const itemsDirty = Boolean(saved) && (
+    itemIds.length !== savedItemIds.length || itemIds.some((id) => !savedItemIds.includes(id))
+  );
+  const dirty = detailsDirty || itemsDirty;
+  const pendingBody = (): Record<string, unknown> => ({
+    ...(detailsDirty ? detailsBody() : {}),
+    ...(itemsDirty ? { item_ids: itemIds } : {}),
+  });
   const changeItems = (next: string[]) => {
-    const previous = itemIds;
     setItemIds(next);
-    patch.mutate({ item_ids: next }, { onError: () => setItemIds(previous) });
+    patch.mutate({ item_ids: next });
   };
 
+  // A close that was asked for while changes were not saved yet. It happens after
+  // the save succeeds. A failed save leaves everything as typed.
+  const [closeAsked, setCloseAsked] = React.useState(false);
   const reset = () => {
+    setCloseAsked(false);
     setFile(null);
     setFileError(null);
     setDragging(false);
@@ -192,21 +206,33 @@ export function DocumentUploadDialog({
     patch.reset();
   };
 
-  // Closing never loses the document: it is already saved. Details that were typed
-  // but not saved yet are saved on the way out.
-  const close = () => {
-    if (upload.isPending || undo.isPending) return;
-    const document = saved;
-    const body = detailsDirty ? detailsBody() : null;
-    if (document && body) {
-      api.patch<DocumentRecord>(`/documents/${document.id}`, body)
-        .then(() => invalidate())
-        .catch((error: unknown) => toast.error(getApiErrorMessage(error)));
-    }
+  // The document is already saved, so closing never loses it. Changes that were made
+  // after that are saved first. The surface closes only when that worked, or when the
+  // person chooses to discard the changes.
+  const finish = (document: DocumentRecord | null = saved) => {
     reset();
     onOpenChange(false);
     if (document) onUploaded?.(document);
   };
+  const close = () => {
+    if (upload.isPending || undo.isPending || patch.isPending) return;
+    if (!saved || !dirty) {
+      finish();
+      return;
+    }
+    setCloseAsked(true);
+    patch.mutate(pendingBody(), { onSuccess: (document) => finish(document) });
+  };
+  const retry = () => {
+    if (patch.isPending || !dirty) return;
+    patch.mutate(pendingBody(), {
+      onSuccess: (document) => {
+        if (closeAsked) finish(document);
+        else setDetails(detailsOf(document));
+      },
+    });
+  };
+  const unsavedError = patch.error && dirty ? getApiErrorMessage(patch.error) : null;
 
   const attachedNames = current?.items.length
     ? current.items.map((item) => item.name)
@@ -233,7 +259,9 @@ export function DocumentUploadDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {upload.error && <FormError message={getApiErrorMessage(upload.error)} />}
+          {upload.error && (
+            <FormError message={`The file was not saved. ${getApiErrorMessage(upload.error)}`} />
+          )}
           {undo.error && <FormError message={getApiErrorMessage(undo.error)} />}
           {fileError && <FormError message={fileError} />}
 
@@ -270,6 +298,11 @@ export function DocumentUploadDialog({
                 </div>
               ) : (
                 <div className="space-y-3">
+                  {upload.error && file && (
+                    // The chosen file is kept, so that it can be sent again.
+                    <DocumentFilePreview url={previewUrl} name={file.name}
+                      detail={`${Math.ceil(file.size / 1024)} KB · not saved yet`} />
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {manualMode
                       ? "PDF or image, up to 25 MB. Drop a file here, or:"
@@ -281,7 +314,7 @@ export function DocumentUploadDialog({
                       className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-within:ring-2 focus-within:ring-ring/40 lg:text-xs"
                     >
                       <FileUp aria-hidden="true" className="size-4" />
-                      {upload.error ? "Choose again" : "Choose a file"}
+                      {upload.error ? "Choose another file" : "Choose a file"}
                     </label>
                     <label
                       htmlFor={`${ids}-camera`}
@@ -293,7 +326,7 @@ export function DocumentUploadDialog({
                     {upload.error && file && (
                       <Button type="button" variant="outline" className="min-h-11"
                         onClick={() => upload.mutate(file)}>
-                        Try again
+                        Retry
                       </Button>
                     )}
                   </div>
@@ -348,8 +381,6 @@ export function DocumentUploadDialog({
               <DocumentProcessingStatus documentId={saved.id} compact
                 documentType={current.document_type} onManualReview={() => undefined} />
 
-              {patch.error && <FormError message={getApiErrorMessage(patch.error)} />}
-
               {fromItem && <AttachedItemChip names={attachedNames} />}
               {!fixedItemManual && (
                 <OptionalStep
@@ -377,10 +408,10 @@ export function DocumentUploadDialog({
                   <Button type="button" size="sm" variant="outline" className="min-h-11"
                     disabled={!detailsDirty || patch.isPending}
                     onClick={() => {
-                      const body = detailsBody();
-                      if (body) patch.mutate(body, { onSuccess: (document) => setDetails(detailsOf(document)) });
+                      setCloseAsked(false);
+                      patch.mutate(pendingBody(), { onSuccess: (document) => setDetails(detailsOf(document)) });
                     }}>
-                    {patch.isPending && <Spinner />}
+                    {patch.isPending && !closeAsked && <Spinner />}
                     Save details
                   </Button>
                   {!detailsDirty && <span className="text-xs text-muted-foreground lg:text-2xs">Nothing to save.</span>}
@@ -405,9 +436,34 @@ export function DocumentUploadDialog({
         </div>
         {saved && (
           <DialogFooter>
-            <Button type="button" className="min-h-11" onClick={close} disabled={undo.isPending}>
-              Done
-            </Button>
+            {unsavedError && (
+              <div className="min-w-0 space-y-1 sm:mr-auto sm:max-w-[55%]">
+                <p role="alert" className="break-words text-xs text-destructive">
+                  Your changes are not saved yet. {unsavedError}
+                </p>
+                <p className="text-xs text-muted-foreground lg:text-2xs">
+                  Everything you entered is still here. Discard closes without these changes;
+                  the {noun} itself stays in the library.
+                </p>
+              </div>
+            )}
+            {unsavedError ? (
+              <>
+                <Button type="button" variant="ghost" className="min-h-11" disabled={patch.isPending}
+                  onClick={() => finish()}>
+                  Discard changes
+                </Button>
+                <Button type="button" className="min-h-11" disabled={patch.isPending} onClick={retry}>
+                  Retry
+                </Button>
+              </>
+            ) : (
+              <Button type="button" className="min-h-11" onClick={close}
+                disabled={undo.isPending || patch.isPending}>
+                {patch.isPending && closeAsked && <Spinner />}
+                {patch.isPending && closeAsked ? "Saving…" : "Done"}
+              </Button>
+            )}
           </DialogFooter>
         )}
       </DialogContent>

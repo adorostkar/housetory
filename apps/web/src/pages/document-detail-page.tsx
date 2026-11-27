@@ -206,7 +206,7 @@ export function DocumentDetailPage() {
         ),
       }}
     >
-      <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,1fr)]">
         <div className="space-y-6">
           <DocumentProcessingStatus documentId={document.id} documentType={document.document_type} onManualReview={() => {
             setManualReviewRequest((request) => ({ documentId: document.id, revision: request.revision + 1 }));
@@ -238,11 +238,11 @@ export function DocumentDetailPage() {
                 </Badge>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <div className="flex flex-col items-center justify-center px-4 py-16 text-center sm:px-6">
                 <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
                   <FileText className="size-6" strokeWidth={1.5} />
                 </span>
-                <p className="mt-4 font-display text-xl tracking-[-0.02em]">
+                <p className="mt-4 max-w-full break-words font-display text-xl tracking-[-0.02em]">
                   {document.original_filename}
                 </p>
                 <p className="mt-1 text-2xs text-muted-foreground">
@@ -384,7 +384,7 @@ export function DocumentDetailPage() {
               ) : (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {document.items.map((item) => (
-                    <Link key={item.id} to={`/items/${item.id}`}>
+                    <Link key={item.id} to={`/items/${item.id}`} className="coarse:inline-flex coarse:min-h-11 coarse:items-center">
                       <Badge variant="secondary" className="hover:bg-secondary/70">
                         {item.name}
                       </Badge>
@@ -625,7 +625,7 @@ function DocumentText({ document }: { document: DocumentRecord }) {
     <details className="surface p-5 sm:p-6" onToggle={(event) => {
       if (event.currentTarget.open) setOpened(true);
     }}>
-      <summary className="cursor-pointer text-xs font-medium">
+      <summary className="cursor-pointer text-xs font-medium coarse:flex coarse:min-h-11 coarse:items-center">
         Extracted text
         <span className="ml-2 text-2xs font-normal text-muted-foreground">
           {text && text.page_total > 0

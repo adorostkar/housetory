@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { fetchCaptureReviews, useCaptureReviews, useSession } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
 import { AssistantPhotoProgress } from "@/components/assistant-photo-progress";
+import { BarEditorRelay, useBarEditor, type BarEditor } from "@/components/shell/bar-editor";
 import {
   assistantTaskKey, CAPTURE_SETTLED_STATUSES, dispatchAssistantTaskCompletion, type CaptureReview,
 } from "@/lib/assistant-task-events";
@@ -43,6 +44,8 @@ interface DocumentReviewContext {
   reviewsError: boolean;
   getImportReviewDraft: (id: string) => ImportReviewDraft | undefined;
   saveImportReviewDraft: (id: string, draft: ImportReviewDraft) => void;
+  /** The bar editor of the surface that shows the reviews now, or null. */
+  relayBarEditor: (editor: BarEditor | null) => void;
 }
 
 export interface ImportReviewDraft {
@@ -302,11 +305,14 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
       },
     }));
   }, [householdId]);
+  // The reviews below are rendered here but shown inside the assistant. They get the
+  // assistant's bar editor from it, so a value is edited at the foot of the assistant.
+  const [barEditor, relayBarEditor] = React.useState<BarEditor | null>(null);
   const value = React.useMemo(() => ({
     activeId, select, node, activeImportId, selectImport, importNode,
     activePhotoId, selectPhoto, photoNode, pendingReviews, reviewsError: reviews.isError,
     dismissReview, undoReview, retryReview, reviewMutationPending,
-    getImportReviewDraft, saveImportReviewDraft,
+    getImportReviewDraft, saveImportReviewDraft, relayBarEditor,
   }), [
     activeId, select, node, activeImportId, selectImport, importNode,
     activePhotoId, selectPhoto, photoNode, reviews.data, reviews.isError,
@@ -316,7 +322,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
   return (
     <AssistantDocumentsContext.Provider value={value}>
       {children}
-      {createPortal(ids.map((id) => (
+      {createPortal(<BarEditorRelay editor={barEditor}>{ids.map((id) => (
         <div key={id} hidden={id !== activeId}>
           <React.Suspense fallback={<p role="status">Loading document review…</p>}>
             <AssistantDocumentReview
@@ -325,8 +331,8 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
             />
           </React.Suspense>
         </div>
-      )), node)}
-      {createPortal(importIds.map((id) => (
+      ))}</BarEditorRelay>, node)}
+      {createPortal(<BarEditorRelay editor={barEditor}>{importIds.map((id) => (
         <div key={id} hidden={id !== activeImportId}>
           <React.Suspense fallback={<p role="status">Loading item review…</p>}>
             <AssistantImportReview
@@ -335,7 +341,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
             />
           </React.Suspense>
         </div>
-      )), importNode)}
+      ))}</BarEditorRelay>, importNode)}
       {createPortal(pendingReviews.filter((review) => review.kind === "photo").map((review) => (
         <div key={`${householdId}:${review.id}`} hidden={review.id !== activePhotoId}>
           <PhotoTask id={review.id} onSelectImport={(id) => {
@@ -364,6 +370,19 @@ export function useAssistantDocuments() {
   const value = React.useContext(AssistantDocumentsContext);
   if (!value) throw new Error("AssistantDocumentsProvider is required");
   return value;
+}
+
+/**
+ * Called by the assistant, which has a bar editor of its own. The reviews drawn into
+ * it then edit their values there, as a review on a page does in the page's bar.
+ */
+export function useRelayBarEditorToReviews() {
+  const editor = useBarEditor();
+  const { relayBarEditor } = useAssistantDocuments();
+  React.useEffect(() => {
+    relayBarEditor(editor);
+    return () => relayBarEditor(null);
+  }, [editor, relayBarEditor]);
 }
 
 export function AssistantDocumentSlot() {

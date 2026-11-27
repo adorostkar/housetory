@@ -153,7 +153,7 @@ export function WarrantiesPage() {
                       {warrantyRemainingLabel(warranty.days_remaining, warranty.status)}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 flex-wrap gap-2">
                     {canWrite && warranty.item && (
                       <Button variant="outline" size="sm" asChild>
                         <Link to={`/items/${warranty.item.id}/edit`}>

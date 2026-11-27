@@ -98,6 +98,8 @@ test.beforeAll(async () => {
                     notes: null,
                     confidence: 88,
                     field_sources: { name: "inferred", brand: "inferred" },
+                    // Only this finding has a position on the photo.
+                    box: { x_min: 0.1, y_min: 0.2, x_max: 0.5, y_max: 0.6 },
                   },
                   {
                     name: `Phase six cables ${scanSuffix}`,
@@ -110,6 +112,7 @@ test.beforeAll(async () => {
                     notes: null,
                     confidence: 74,
                     field_sources: { name: "inferred" },
+                    box: null,
                   },
                 ],
                 warnings: [],
@@ -383,9 +386,28 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
   const cameraRow = review.getByRole("article", { name: cameraName });
   const cablesRow = review.getByRole("article", { name: cablesName });
   await expect(cameraRow).toBeVisible();
-  await expect(cablesRow.getByLabel(`Quantity of ${cablesName}`)).toHaveValue("3");
+  // The recognition gave a position for the camera only. The photo has a pin for it
+  // and no pin for the cables, and a plain line says that one finding is not marked.
+  const cameraPin = review.getByRole("button", { name: `Finding 1: ${cameraName}` });
+  await expect(cameraPin).toBeVisible();
+  await expect(review.getByRole("button", { name: /^Finding \d+: / })).toHaveCount(1);
+  await expect(
+    review.getByText("1 of 2 findings is not marked on the photo: its position is not known."),
+  ).toBeVisible();
+  // Both rows keep their number, with or without a pin.
+  await expect(cameraRow.getByLabel("Finding 1", { exact: true })).toBeVisible();
+  await expect(cablesRow.getByLabel("Finding 2", { exact: true })).toBeVisible();
+  // Pointing at the pin marks the area the recognition gave on the photo.
+  await cameraPin.focus();
+  await expect(cameraPin).toHaveAttribute("aria-pressed", "true");
+  await expect(review.getByTestId("finding-region")).toHaveAttribute(
+    "style",
+    /left: 10%; top: 20%; width: 40%; height: 40%;/,
+  );
+  // In the shell, a value of a closed row is a button that opens it in the bottom bar.
+  await expect(cablesRow.getByRole("button", { name: `Edit quantity of ${cablesName}` })).toHaveText("×3");
   // The destination comes from the container. The full fields are behind Edit.
-  await cameraRow.getByRole("button", { name: "Edit" }).click();
+  await cameraRow.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(cameraRow.getByLabel(/^Room/)).toHaveValue(room.id);
   await expect(cameraRow.getByLabel(/^Storage place/)).toHaveValue(container.id);
 
@@ -406,6 +428,14 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
     metadata: { ai_provider: string; ai_model: string };
   };
   expect(batch.metadata).toMatchObject({ ai_provider: "ollama", ai_model: "llava:latest" });
+  // The stored entries carry the position only where the recognition gave one.
+  const stored = (await (await request.get(`/api/v1/imports/${batches.items[0]!.id}`)).json()) as {
+    entries: Array<{ proposed: { name: string }; source_region: Record<string, number> | null }>;
+  };
+  expect(stored.entries.find((entry) => entry.proposed.name === cameraName)?.source_region).toEqual({
+    x: 0.1, y: 0.2, width: 0.4, height: 0.4,
+  });
+  expect(stored.entries.find((entry) => entry.proposed.name === cablesName)?.source_region).toBeNull();
 
   const itemsResponse = await request.get(`/api/v1/items?limit=100&room_id=${room.id}`);
   expect(itemsResponse.ok()).toBeTruthy();
@@ -422,6 +452,96 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
   const photos = await request.get(`/api/v1/items/${camera?.id}`);
   const detail = (await photos.json()) as { item: { photos: unknown[] } };
   expect(detail.item.photos).toHaveLength(0);
+});
+
+test("edits a finding's name in the assistant sheet's own editor on a phone, and Escape closes the editor first", async ({
+  page,
+  request,
+}) => {
+  await ensureMockProvider(request);
+  scanSuffix = Date.now().toString().slice(-8);
+  const cameraName = `Phase six camera ${scanSuffix}`;
+  const editedName = `Rangefinder camera ${scanSuffix}`;
+  const cablesName = `Phase six cables ${scanSuffix}`;
+  const editedCables = `Charging cables ${scanSuffix}`;
+  const room = await createRoom(request, `Phase 6 phone scan ${Date.now()}`);
+  const container = await createContainer(request, room.id, "Phone camera gear");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/containers/${container.id}`);
+  await page.locator("main").getByRole("button", { name: "Add items" }).first().click();
+  const addItems = page.getByRole("dialog", { name: "Add items" });
+  await addItems.getByTestId("smart-add-camera").setInputFiles(photoPath);
+  await addItems.getByRole("button", { name: "Review items" }).click();
+
+  const sheet = page.getByTestId("assistant-panel");
+  const review = sheet.getByRole("region", { name: "Assistant item review" });
+  await expect(review.getByRole("heading", { name: "Photo review: icon-192.png" })).toBeVisible({
+    timeout: 30_000,
+  });
+  // The sheet covers the page's bottom bar, so the value is edited in the sheet's own
+  // editor, at the foot of the sheet.
+  const nameButton = review.getByRole("button", { name: `Edit name of ${cameraName}` });
+  await expect(nameButton).toHaveText(cameraName);
+  await expect(review.getByRole("textbox", { name: /^Name of / })).toHaveCount(0);
+  await nameButton.click();
+  const editor = sheet.getByTestId("bar-editor");
+  await expect(editor).toBeVisible();
+  await expect(page.getByTestId("bar-editor")).toHaveCount(1);
+  const field = editor.getByRole("textbox");
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(cameraName);
+  const [sheetBox, editorBox] = [await sheet.boundingBox(), await editor.boundingBox()];
+  expect(Math.abs(sheetBox!.y + sheetBox!.height - (editorBox!.y + editorBox!.height))).toBeLessThanOrEqual(1);
+  expect(editorBox!.width).toBe(390);
+
+  // Escape closes the editor only. The sheet and the review stay, the name is as it
+  // was, and the focus is on the value again.
+  await field.fill("Not this name");
+  await page.keyboard.press("Escape");
+  await expect(editor).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+  await expect(nameButton).toHaveText(cameraName);
+  await expect(nameButton).toBeFocused();
+
+  // Enter saves a new name into the row.
+  const cablesButton = review.getByRole("button", { name: `Edit name of ${cablesName}` });
+  await cablesButton.click();
+  await field.fill(editedCables);
+  await page.keyboard.press("Enter");
+  await expect(editor).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+  // The row now has the new name, and the label of the value follows it.
+  const cablesRow = review.getByRole("article", { name: editedCables });
+  await expect(cablesRow.getByRole("button", { name: `Edit name of ${editedCables}` })).toHaveText(editedCables);
+  await expect(review.getByRole("button", { name: `Edit name of ${cablesName}` })).toHaveCount(0);
+  await expect(review.getByRole("article", { name: cablesName })).toHaveCount(0);
+
+  // An empty name is open in the editor: "Add item" does nothing. The editor stays
+  // with the reason, the focus is in its field again, and no item is added.
+  const itemNames = async () =>
+    ((await (await request.get(`/api/v1/items?limit=100&room_id=${room.id}`)).json()) as {
+      items: Array<{ name: string }>;
+    }).items.map((item) => item.name);
+  const cameraRow = review.getByRole("article", { name: cameraName });
+  await nameButton.click();
+  await field.fill("");
+  await cameraRow.getByRole("button", { name: "Add item" }).click();
+  await expect(editor.getByRole("alert")).toHaveText("Give this item a name.");
+  await expect(field).toBeFocused();
+  await expect(cameraRow).toBeVisible();
+  await expect(cameraRow.getByRole("button", { name: "Add item" })).toBeEnabled();
+  expect(await itemNames()).toEqual([]);
+
+  // A new name is typed and "Add item" is pressed without Enter: the typed name is
+  // saved first, and the item is added with it.
+  await field.fill(editedName);
+  await cameraRow.getByRole("button", { name: "Add item" }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+  await expect.poll(itemNames).toEqual([editedName]);
+  // The other row is still open with its edited name, and was not added.
+  await expect(cablesRow.getByRole("button", { name: `Edit name of ${editedCables}` })).toHaveText(editedCables);
 });
 
 test("scans into a room only, flags fixed fixtures and applies a per-suggestion destination", async ({
@@ -464,6 +584,10 @@ test("scans into a room only, flags fixed fixtures and applies a per-suggestion 
     timeout: 30_000,
   });
   await expect(review.getByText(/4 proposals/)).toBeVisible();
+  // This recognition gave no positions at all: the photo has no pins and says so.
+  await expect(review.getByRole("img", { name: "The photo these items were found in" })).toBeVisible();
+  await expect(review.getByText("Positions are not available for this photo.")).toBeVisible();
+  await expect(review.getByRole("button", { name: /^Finding \d+: / })).toHaveCount(0);
   const batches = (await (await request.get("/api/v1/imports?limit=1")).json()) as {
     items: Array<{ id: string }>;
   };
@@ -483,17 +607,17 @@ test("scans into a room only, flags fixed fixtures and applies a per-suggestion 
   const windowRow = review.getByRole("article", { name: `Window ${scanSuffix}` });
   const radiatorRow = review.getByRole("article", { name: `Radiator ${scanSuffix}` });
   const heaterRow = review.getByRole("article", { name: heaterName });
-  await expect(windowRow.getByRole("button", { name: "Edit" })).toHaveAttribute("aria-expanded", "false");
+  await expect(windowRow.getByRole("button", { name: "Edit", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(windowRow.getByText(/^Check: /))
     .toContainText("Windows are fixed architectural features, not movable possessions.");
   await expect(radiatorRow.getByText(/^Check: /)).toContainText("Radiators are usually installed fixtures.");
   await expect(heaterRow).not.toContainText(/fixed architectural|installed fixtures/i);
   // The full reason is in the row's details.
-  await windowRow.getByRole("button", { name: "Edit" }).click();
+  await windowRow.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(windowRow.getByText(/fixed architectural features/i).first()).toBeVisible();
   await windowRow.getByRole("button", { name: "Close" }).click();
 
-  await heaterRow.getByRole("button", { name: "Edit" }).click();
+  await heaterRow.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(heaterRow.getByLabel(/^Room/)).toHaveValue(room.id);
   await expect(heaterRow.getByLabel(/^Storage place/)).toHaveValue("");
   await heaterRow.getByLabel(/^Room/).selectOption(otherRoom.id);

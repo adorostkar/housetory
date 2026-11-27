@@ -100,7 +100,7 @@ export function DocumentCard({
               <Link
                 key={item.id}
                 to={`/items/${item.id}`}
-                className="relative z-10 min-w-0 max-w-full"
+                className="relative z-10 min-w-0 max-w-full coarse:inline-flex coarse:min-h-11 coarse:items-center"
                 title={item.name}
               >
                 <Badge variant="secondary" className="max-w-full hover:bg-secondary/70">

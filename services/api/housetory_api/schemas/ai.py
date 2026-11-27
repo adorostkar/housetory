@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..domain import PurchaseInfoFilter
 from ..schemas.borrowed import BorrowedOut
 from ..schemas.common import Description, ORMModel, trimmed
+from ..schemas.imports import SourceRegion
 from ..schemas.items import ItemSummary
 from ..schemas.search import QuickSearchResult, SearchHousehold, SearchProperty
 
@@ -109,6 +110,8 @@ class AiRecognitionSuggestion(BaseModel):
     review: bool = False
     review_reason: str | None = Field(default=None, max_length=500)
     field_sources: dict[str, str] = Field(default_factory=dict)
+    # Set by the server from a checked model box. Never taken from the model as is.
+    source_region: SourceRegion | None = None
 
 
 class AiRecognitionResult(BaseModel):

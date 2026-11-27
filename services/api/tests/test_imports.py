@@ -1597,3 +1597,186 @@ def test_skipped_row_keeps_its_edits_and_can_be_restored_then_added_once(owner_c
     names = sorted(item["name"] for item in owner_client.get("/api/v1/items").json()["items"])
     assert names == ["Climbing rope", "Ladder"]
     assert owner_client.post(restore_url).status_code == 409
+
+
+def test_skip_reload_restore_keeps_the_complete_edited_draft_and_apply_uses_it(owner_client):
+    attic = create_room(owner_client, "Attic")
+    garage = create_room(owner_client, "Garage")
+    shelf = create_location(owner_client, garage["id"], "Shelf B")
+    tools = owner_client.post("/api/v1/categories", json={"name": "Tools"}).json()
+    existing = owner_client.post(
+        "/api/v1/items", json={"name": "Old rope", "room_id": attic["id"], "quantity": 1}
+    ).json()
+    existing_id = existing.get("item", existing)["id"]
+    batch = upload_text_import(owner_client, "Ladder in the attic. Rope in the attic.")
+    detail = process_import(owner_client, batch["id"])
+    entries = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
+    ladder, rope = entries["Ladder"], entries["Rope"]
+    batch_url = f"/api/v1/imports/{batch['id']}"
+
+    def matched(kind, record, room_id=None):
+        return {
+            "text": record["name"],
+            "entity_type": kind,
+            "status": "matched",
+            "matched_id": record["id"],
+            "name": record["name"],
+            "room_id": room_id or record["id"],
+            "parent_id": None,
+            "suggested_parent_id": None,
+            "candidates": [],
+        }
+
+    # Every group of the row editor is changed: identity, category and tags, location,
+    # prices, warranty and notes.
+    edited_ladder = {
+        **ladder["proposed"],
+        "name": "Step ladder",
+        "quantity": 2,
+        "description": "Aluminium, 6 steps",
+        "brand": "Wibe",
+        "model": "55P",
+        "serial_number": "SN-LADDER-1",
+        "category": {
+            "text": "Tools",
+            "status": "matched",
+            "matched_id": tools["id"],
+            "name": "Tools",
+            "candidates": [],
+        },
+        "tags": ["garage", "tall"],
+        "room": matched("room", garage),
+        "storage_location": matched("storage_location", shelf, garage["id"]),
+        "purchase": {
+            "merchant": "Bauhaus",
+            "purchase_date": "2026-03-04",
+            "price_cents": 129900,
+            "currency": "SEK",
+            "order_number": "ORD-77",
+            "notes": None,
+        },
+        "warranty": {
+            "provider": "Wibe",
+            "start_date": None,
+            "duration_months": None,
+            "end_date": "2031-03-04",
+            "notes": None,
+        },
+        "notes": "Check the feet",
+    }
+    # The other row is an update of an item that exists: its action and target are a
+    # choice of the review, not a field of the proposal.
+    edited_rope = {**rope["proposed"], "name": "Climbing rope", "brand": "Beal", "quantity": 3}
+    skipped = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {"id": ladder["id"], "action": "skip", "proposed": edited_ladder},
+                {
+                    "id": rope["id"],
+                    "action": "skip",
+                    "proposed": edited_rope,
+                    "merge_item_id": existing_id,
+                    "merge_fields": ["brand", "quantity"],
+                },
+            ]
+        },
+    )
+    assert skipped.status_code == 200, skipped.text
+
+    def fetch():
+        fetched = owner_client.get(batch_url).json()
+        return {entry["id"]: entry for entry in fetched["entries"]}
+
+    def without_draft(proposed):
+        relationships = {
+            key: value
+            for key, value in proposed["relationships"].items()
+            if key != "review_draft"
+        }
+        return {**proposed, "relationships": relationships}
+
+    # Reload while skipped: the whole edited proposal and the choices are there.
+    after_skip = fetch()
+    assert after_skip[ladder["id"]]["status"] == "skipped"
+    def kept(actual, expected):
+        # The stored proposal may add default keys; every value that was sent is there.
+        if isinstance(expected, dict):
+            return all(kept(actual.get(key), value) for key, value in expected.items())
+        return actual == expected
+
+    for key, value in edited_ladder.items():
+        if key != "relationships":
+            assert kept(after_skip[ladder["id"]]["proposed"][key], value), key
+    assert after_skip[ladder["id"]]["proposed"]["relationships"]["review_draft"] == {
+        "action": "import",
+        "merge_item_id": None,
+        "merge_fields": [],
+        "allow_duplicate": False,
+    }
+    rope_draft = after_skip[rope["id"]]["proposed"]["relationships"]["review_draft"]
+    assert rope_draft == {
+        "action": "merge",
+        "merge_item_id": existing_id,
+        "merge_fields": ["brand", "quantity"],
+        "allow_duplicate": False,
+    }
+    for key in ("name", "brand", "quantity"):
+        assert after_skip[rope["id"]]["proposed"][key] == edited_rope[key], key
+    assert without_draft(after_skip[rope["id"]]["proposed"])["relationships"] == (
+        rope["proposed"]["relationships"]
+    )
+
+    # Restore does not touch the draft, and neither does another reload.
+    for entry in (ladder, rope):
+        restored = owner_client.post(f"{batch_url}/entries/{entry['id']}/restore")
+        assert restored.status_code == 200, restored.text
+    after_restore = fetch()
+    for entry in (ladder, rope):
+        assert after_restore[entry["id"]]["status"] == "proposed"
+        assert after_restore[entry["id"]]["proposed"] == after_skip[entry["id"]]["proposed"]
+
+    # A later apply uses the kept draft: nothing is sent again but the choices.
+    applied = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {"id": ladder["id"], "action": "import"},
+                {
+                    "id": rope["id"],
+                    "action": rope_draft["action"],
+                    "merge_item_id": rope_draft["merge_item_id"],
+                    "merge_fields": rope_draft["merge_fields"],
+                },
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert (applied.json()["created"], applied.json()["merged"]) == (1, 1), applied.json()
+    final = fetch()
+    assert "review_draft" not in final[ladder["id"]]["proposed"]["relationships"]
+
+    created = owner_client.get(
+        f"/api/v1/items/{final[ladder['id']]['imported_item_id']}"
+    ).json()["item"]
+    assert created["name"] == "Step ladder"
+    assert created["quantity"] == 2
+    assert created["description"].startswith("Aluminium, 6 steps")
+    assert (created["brand"], created["model"], created["serial_number"]) == (
+        "Wibe",
+        "55P",
+        "SN-LADDER-1",
+    )
+    assert created["category"]["id"] == tools["id"]
+    assert sorted(tag["name"] for tag in created["tags"]) == ["garage", "tall"]
+    assert created["room"]["id"] == garage["id"]
+    assert created["location"]["id"] == shelf["id"]
+    assert created["purchase"]["price_cents"] == 129900
+    assert created["purchase"]["currency"] == "SEK"
+    assert created["purchase"]["merchant"] == "Bauhaus"
+    assert created["purchase"]["purchase_date"] == "2026-03-04"
+    assert created["warranty"]["end_date"] == "2031-03-04"
+
+    updated = owner_client.get(f"/api/v1/items/{existing_id}").json()["item"]
+    assert updated["name"] == "Old rope"
+    assert (updated["brand"], updated["quantity"]) == ("Beal", 3)

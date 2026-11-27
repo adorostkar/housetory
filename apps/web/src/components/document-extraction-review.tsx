@@ -50,6 +50,9 @@ import {
   type LineDraft,
   buildApplyPayload,
   lineDraftErrors,
+  restoreLineDraft,
+  savedCandidate,
+  serializeLineDraft,
   candidateFromItem,
   centsInput,
   fieldValue,
@@ -160,23 +163,32 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
           fields,
           productLines.length === 1,
         );
-        // A skipped line comes back with the values it had when it was skipped.
-        const saved = extractionQuery.data?.line_states?.[line.id];
-        const kept = saved?.status === "skipped"
-          ? {
-              ...draft,
-              description: saved.description ?? draft.description,
-              quantity: saved.quantity != null ? String(saved.quantity) : draft.quantity,
-              lineTotal: saved.line_total_cents != null ? centsInput(saved.line_total_cents) : draft.lineTotal,
-              newItem: { ...draft.newItem, name: saved.description ?? draft.newItem.name },
-            }
-          : draft;
+        // A line that was skipped comes back with the complete draft it had then:
+        // amounts, action and target, new item, updates, stock and warranty.
+        const state = extractionQuery.data?.line_states?.[line.id];
+        const kept = restoreLineDraft(draft, state);
         if (captureContext?.documentId !== document.id) return kept;
+        // The place chosen at capture is only a start. A place that was changed on
+        // the row and kept with a skip wins over it.
+        const keptPlace = state && state.status !== "applied"
+          && Boolean((state.draft as { newItem?: unknown } | null | undefined)?.newItem);
+        if (keptPlace) return kept;
         return { ...kept, newItem: { ...kept.newItem,
           roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
       }),
     );
-    setMatches(proposalMatches);
+    // An item that was chosen by hand is not among the proposed matches after a
+    // reload. It was kept with the draft, so the row can still name its target.
+    setMatches(productLines.reduce((all, line) => {
+      const candidate = savedCandidate(extractionQuery.data?.line_states?.[line.id]);
+      if (!candidate) return all;
+      const existing = all.find((match) => match.line_id === line.id);
+      if (existing?.candidates.some((entry) => entry.id === candidate.id)) return all;
+      return existing
+        ? all.map((match) => match === existing
+          ? { ...match, candidates: [candidate, ...match.candidates] } : match)
+        : [...all, { line_id: line.id, candidates: [candidate], quality: "possible" as const, reasons: candidate.reasons ?? [] }];
+    }, proposalMatches));
     setMerchant(fieldValue(fields.merchant ?? document.merchant));
     setPurchaseDate(fieldValue(fields.purchase_date));
     setDocumentDate(fieldValue(fields.document_date ?? document.document_date));
@@ -379,6 +391,12 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
           description: draft.description.trim().slice(0, 300) || null,
           quantity: parseQuantity(draft.quantity),
           line_total_cents: parseMoney(draft.lineTotal),
+          // The whole row, so that a reload and Restore bring all of it back.
+          draft: serializeLineDraft(
+            draft,
+            matches.find((match) => match.line_id === draft.line.id)
+              ?.candidates.find((candidate) => candidate.id === draft.itemId),
+          ),
         },
       ),
     onSuccess: (result, { draft, restore }) => {
@@ -1215,11 +1233,40 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
             // The row says what the line would do. For an existing item it shows old → new.
             const values: ReviewValue[] = [
               ...(draft.lineTotal.trim()
-                ? [{ label: "Line total", value: draft.lineTotal, uncertain: amountError(draft.lineTotal) }]
+                ? [{
+                    label: "Line total",
+                    value: draft.lineTotal,
+                    uncertain: amountError(draft.lineTotal),
+                    // The same update as the Line total field of the editor.
+                    edit: {
+                      description: `Line total of line ${draft.line.line_number}`,
+                      value: draft.lineTotal,
+                      inputMode: "decimal" as const,
+                      validate: (value: string) =>
+                        value === "" || parseMoney(value) != null
+                          ? null : "Enter an amount such as 24.50, or leave it empty.",
+                      onCommit: (value: string) =>
+                        updateDraft(draft.line.id, (current) => ({ ...current, lineTotal: value })),
+                    },
+                  }]
                 : []),
               ...(draft.action === "create"
                 ? [
-                    { label: "Add as", value: draft.newItem.name.trim() || "no name", uncertain: !draft.newItem.name.trim() },
+                    {
+                      label: "Add as",
+                      value: draft.newItem.name.trim() || "no name",
+                      uncertain: !draft.newItem.name.trim(),
+                      // The same update as the New item name field of the editor.
+                      edit: {
+                        label: "Item name",
+                        description: `Name of the new item of line ${draft.line.line_number}`,
+                        value: draft.newItem.name,
+                        validate: (value: string) => (value ? null : "A new item needs a name."),
+                        onCommit: (value: string) => updateDraft(draft.line.id, (current) => ({
+                          ...current, newItem: { ...current.newItem, name: value },
+                        })),
+                      },
+                    },
                     {
                       label: "Room",
                       value: roomName(draft.newItem.roomId) ?? "not chosen",
@@ -1255,6 +1302,10 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
                 quantity={draft.quantity}
                 onQuantityChange={(quantity) =>
                   updateDraft(draft.line.id, (current) => ({ ...current, quantity }))}
+                titleValidate={(value) => (value ? null : "Give this line a name.")}
+                quantityValidate={(value) =>
+                  value === "" || parseQuantity(value)
+                    ? null : "Enter a whole number of at least 1, or leave it empty."}
                 values={values}
                 disabled={applyMutation.isPending || skipMutation.isPending}
                 selection={{

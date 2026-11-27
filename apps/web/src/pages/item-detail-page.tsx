@@ -401,7 +401,7 @@ export function ItemDetailPage({
                           )}
                           <Link
                             to={`/rooms/${room.id}`}
-                            className="underline-offset-4 hover:underline"
+                            className="underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                           >
                             {room.name}
                           </Link>
@@ -410,7 +410,7 @@ export function ItemDetailPage({
                     ) : (
                       <Link
                         to={`/rooms/${item.room.id}`}
-                        className="underline-offset-4 hover:underline"
+                        className="underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                       >
                         {item.room.name}
                       </Link>
@@ -428,7 +428,7 @@ export function ItemDetailPage({
                                   ? `/containers/${location.id}`
                                   : `/rooms/${item.room?.id}?location_id=${location.id}`
                               }
-                              className="underline-offset-4 hover:underline"
+                              className="underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                             >
                               {locationLabel(location)}
                             </Link>
@@ -572,7 +572,7 @@ export function ItemDetailPage({
                   {item.category ? (
                     <Link
                       to={`/items?category_id=${item.category.id}`}
-                      className="inline-flex items-center gap-1.5 underline-offset-4 hover:underline"
+                      className="inline-flex items-center gap-1.5 underline-offset-4 hover:underline coarse:min-h-11"
                     >
                       <span
                         className="size-1.5 rounded-full bg-current opacity-70"
@@ -771,7 +771,7 @@ export function ItemDetailPage({
                 {item.tags.length > 0 && (
                   <div className="mt-5 flex flex-wrap gap-1.5 border-t border-border/60 pt-4">
                     {item.tags.map((tag) => (
-                      <Link key={tag.id} to={`/items?tag_id=${tag.id}`}>
+                      <Link key={tag.id} to={`/items?tag_id=${tag.id}`} className="coarse:inline-flex coarse:min-h-11 coarse:items-center">
                         <Badge variant="outline" className="hover:bg-secondary">
                           {tag.name}
                         </Badge>
@@ -922,7 +922,7 @@ export function ItemDetailPage({
                       {item.purchase.receipt ? (
                         <Link
                           to={`/documents/${item.purchase.receipt.id}`}
-                          className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:min-h-11"
                         >
                           <FileText className="size-3.5" />
                           {item.purchase.receipt.title}
@@ -930,7 +930,7 @@ export function ItemDetailPage({
                       ) : (
                         <Link
                           to={`/items/${item.id}/edit`}
-                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                         >
                           Link a receipt
                         </Link>
@@ -939,7 +939,7 @@ export function ItemDetailPage({
                         to={`/purchases?q=${encodeURIComponent(
                           item.purchase.merchant || item.purchase.vendor || "",
                         )}`}
-                        className="ml-auto text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                        className="ml-auto text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                       >
                         All purchases
                       </Link>
@@ -1047,7 +1047,7 @@ export function ItemDetailPage({
                         <li key={loan.id}>
                           <Link
                             to={`/loans/${loan.id}`}
-                            className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-2xs transition-colors hover:bg-secondary/30"
+                            className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-2xs transition-colors hover:bg-secondary/30 coarse:min-h-11"
                           >
                             <span className="min-w-0 truncate">
                               {loan.borrower_name} · {loan.outstanding_quantity}{" "}
@@ -1065,7 +1065,7 @@ export function ItemDetailPage({
                     {loanSummary && loanSummary.outstanding_loan_count > 4 && (
                       <Link
                         to={`/loans?item_id=${item.id}`}
-                        className="mt-3 inline-block text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                        className="mt-3 inline-block text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                       >
                         All {loanSummary.outstanding_loan_count} open loans
                       </Link>
@@ -1144,7 +1144,7 @@ export function ItemDetailPage({
                     {item.warranty.document && (
                       <Link
                         to={`/documents/${item.warranty.document.id}`}
-                        className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-3 text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                        className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-3 text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:min-h-11"
                       >
                         <FileText className="size-3.5" />
                         {item.warranty.document.title}

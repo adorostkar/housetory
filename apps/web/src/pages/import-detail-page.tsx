@@ -26,6 +26,7 @@ import {
   validateImportEntry,
   type ImportEntryErrors,
 } from "@/components/import-entry-card";
+import { FindingsPhoto } from "@/components/findings-photo";
 import { SkippedRow, SkippedSection } from "@/components/review-row";
 import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,29 @@ import type {
 import { formatDate, pluralize } from "@/lib/utils";
 import { enhancementLabel, keepManualEdits, proposalValue } from "@/lib/enrichment";
 
+/** The review choices the server kept with a skipped row (see `review_draft`). */
+function reviewDraftOf(entry: ImportEntry): Partial<ImportDecision> {
+  const draft = entry.proposed.relationships?.review_draft as {
+    action?: string;
+    merge_item_id?: string | null;
+    merge_fields?: ImportDecision["mergeFields"];
+    allow_duplicate?: boolean;
+    entity_type?: ImportDecision["entityType"];
+    parent_entry_id?: string | null;
+    legacy_identifier?: string | null;
+  } | undefined;
+  if (!draft || typeof draft !== "object") return {};
+  return {
+    action: draft.action === "merge" ? "merge" : "import",
+    mergeItemId: draft.merge_item_id ?? "",
+    mergeFields: Array.isArray(draft.merge_fields) ? draft.merge_fields : [],
+    allowDuplicate: Boolean(draft.allow_duplicate),
+    ...(draft.entity_type ? { entityType: draft.entity_type } : {}),
+    ...("parent_entry_id" in draft ? { parentEntryId: draft.parent_entry_id ?? null } : {}),
+    ...("legacy_identifier" in draft ? { legacyIdentifier: draft.legacy_identifier ?? null } : {}),
+  };
+}
+
 export function ImportDetailPage({
   batchId: providedBatchId,
   embedded = false,
@@ -83,6 +107,8 @@ export function ImportDetailPage({
   // Messages from the last attempt to accept a row. They sit beside their fields.
   const [errors, setErrors] = React.useState<Record<string, ImportEntryErrors>>({});
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
+  // The finding that is pointed at, from its row or from its pin on the photo.
+  const [activeFinding, setActiveFinding] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setSummary(null);
@@ -104,13 +130,26 @@ export function ImportDetailPage({
       const highDuplicate = entry.duplicate_candidates.find(
         (candidate) => candidate.score >= duplicateThreshold,
       );
-      const final = ["imported", "merged", "skipped", "rejected"].includes(entry.status);
-      if (final) {
+      const done = entry.status === "imported" || entry.status === "merged";
+      const skippedNow = entry.status === "skipped" || entry.status === "rejected";
+      // The choices that were kept with a skipped row: what to do, and with which target.
+      const kept = reviewDraftOf(entry);
+      if (done) {
         nextDecisions[entry.id] = {
           include: false,
           action: "import",
           mergeItemId: entry.matched_item_id ?? "",
           mergeFields: [],
+        };
+      } else if (skippedNow) {
+        // A skipped row keeps its whole draft. Restore brings it back as it was.
+        nextDecisions[entry.id] = {
+          action: "import",
+          mergeItemId: "",
+          mergeFields: [],
+          ...nextDecisions[entry.id],
+          ...kept,
+          include: false,
         };
       } else if (!(entry.id in nextDecisions)) {
         // A review starts with nothing selected. A failed row keeps what it had, so
@@ -120,6 +159,7 @@ export function ImportDetailPage({
           action: "import",
           mergeItemId: highDuplicate?.item_id ?? "",
           mergeFields: highDuplicate ? ["serial_number"] : [],
+          ...kept,
         };
       } else if (nextDecisions[entry.id]?.action === "skip" || nextDecisions[entry.id]?.action === "reject") {
         // A restored row comes back open and not selected.
@@ -194,19 +234,19 @@ export function ImportDetailPage({
     const proposed = edited && forced && !Number.isInteger(edited.quantity)
       ? { ...edited, quantity: entry?.proposed.quantity ?? 1 }
       : edited;
+    // The chosen action and its target go with a skip too, so that the server keeps
+    // the complete draft of the row.
+    const mergeChoice = decision?.action === "merge"
+      ? { merge_item_id: decision.mergeItemId || null, merge_fields: decision.mergeFields }
+      : {};
     if (action === "merge" && decision) {
-      return {
-        id,
-        action,
-        proposed,
-        merge_item_id: decision.mergeItemId,
-        merge_fields: decision.mergeFields,
-      };
+      return { id, action, proposed, ...mergeChoice };
     }
     return {
       id,
       action,
       proposed,
+      ...(forced ? mergeChoice : {}),
       ...(hierarchy
         ? {
             entity_type:
@@ -392,6 +432,14 @@ export function ImportDetailPage({
   ]
     .filter(Boolean)
     .join(" · ");
+  // The findings of a photo are numbered in the order the server gives them. The
+  // number stays the same when another row is skipped.
+  const photoReview = !hierarchyMode && typeof batch.metadata.recognition_id === "string";
+  const findingNumbers = new Map(batch.entries.map((entry, index) => [entry.id, index + 1]));
+  const shownEntries = batch.entries.filter(
+    (entry) => entry.status !== "skipped" && entry.status !== "rejected",
+  );
+  const findingRowId = (entryId: string) => `finding-${entryId}`;
   const isOpen = (entry: ImportEntry) => entry.status === "proposed" || entry.status === "failed";
   const openEntries = batch.entries.filter(isOpen);
   const skippedEntries = batch.entries.filter(
@@ -784,11 +832,27 @@ export function ImportDetailPage({
 
       {reviewable && batch.entries.length > 0 && (
         <>
-          {typeof batch.metadata.recognition_id === "string" && (
-            <img
-              src={`/api/v1/ai/recognitions/${batch.metadata.recognition_id}/image`}
+          {photoReview && (
+            // Each finding has a number. A pin is drawn only where the recognition
+            // gave a real position; the others are named honestly, without a pin.
+            <FindingsPhoto
+              className="mt-4"
+              src={`/api/v1/ai/recognitions/${batch.metadata.recognition_id as string}/image`}
               alt="The photo these items were found in"
-              className="mt-4 max-h-56 w-full rounded-2xl border border-border/60 bg-secondary/30 object-contain"
+              findings={shownEntries.map((entry) => ({
+                id: entry.id,
+                number: findingNumbers.get(entry.id) ?? 0,
+                name: (edits[entry.id] ?? entry.proposed).name,
+                region: entry.source_region,
+              }))}
+              activeId={activeFinding}
+              onPoint={setActiveFinding}
+              onActivate={(id) => {
+                setActiveFinding(id);
+                const element = document.getElementById(findingRowId(id));
+                element?.scrollIntoView?.({ block: "center" });
+                element?.focus({ preventScroll: true });
+              }}
             />
           )}
           {hasOpenEntries && (
@@ -838,11 +902,16 @@ export function ImportDetailPage({
             </div>
           ) : (
             <div className="mt-3 space-y-3">
-              {batch.entries.filter((entry) => entry.status !== "skipped" && entry.status !== "rejected")
-                .map((entry: ImportEntry) => (
+              {shownEntries.map((entry: ImportEntry) => (
                 <ImportEntryCard
                   key={entry.id}
                   entry={entry}
+                  {...(photoReview ? {
+                    rowId: findingRowId(entry.id),
+                    number: findingNumbers.get(entry.id),
+                    marked: activeFinding === entry.id,
+                    onActivate: () => setActiveFinding(entry.id),
+                  } : {})}
                   proposed={edits[entry.id] ?? entry.proposed}
                   decision={
                     decisions[entry.id] ?? {

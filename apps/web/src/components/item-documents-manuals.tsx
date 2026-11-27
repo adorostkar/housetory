@@ -84,7 +84,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             One library for receipts, warranties, manuals and other files. The assistant
             reads attached manuals to answer questions and names the pages it used. When no
-            manual is attached, it can look for one online and asks you before it saves it.
+            manual is attached, it can look for one online. It saves a clear match and tells you; you can remove it here. When it is not sure, it asks first.
           </p>
           {assistantStatus.data && !assistantStatus.data.configured && (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -194,11 +194,12 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                   key={document.id}
                   className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
                 >
-                  <div className="min-w-0 flex-1">
+                  {/* On touch the three buttons are 44 px each. They go under the title when it gets too narrow. */}
+                  <div className="min-w-0 flex-1 coarse:basis-40">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Link
                         to={`/documents/${document.id}`}
-                        className="min-w-0 break-words text-sm font-medium underline-offset-4 hover:underline"
+                        className="min-w-0 break-words text-sm font-medium underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                       >
                         {document.title}
                       </Link>
@@ -228,14 +229,14 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                   </div>
                   <Link
                     to={`/documents/${document.id}`}
-                    className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground coarse:size-11"
                     aria-label={`Open ${document.title}`}
                   >
                     <FileText className="size-3.5" />
                   </Link>
                   <a
                     href={document.url}
-                    className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground coarse:size-11"
                     aria-label={`Download ${document.title}`}
                   >
                     <Download className="size-3.5" />
@@ -244,7 +245,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                     <button
                       type="button"
                       onClick={() => setDocumentToDelete(document)}
-                      className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive coarse:size-11"
                       aria-label={`Delete ${document.title}`}
                     >
                       <Trash2 className="size-3.5" />

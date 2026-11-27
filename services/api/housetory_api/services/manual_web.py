@@ -50,9 +50,13 @@ MANUAL_LINK_TERMS = (
     "instruction",
     "operator",
     "user guide",
+    "user's guide",
+    "users guide",
     "owner's manual",
     "owners manual",
 )
+# The words of a table row or list item that are kept as the label of a link in it.
+MAX_ROW_LABEL_CHARS = 300
 COMMON_SECOND_LEVEL_LABELS = {"ac", "co", "com", "edu", "gov", "net", "org"}
 
 
@@ -717,31 +721,50 @@ def _brave_candidate(
 
 
 class _AnchorParser(HTMLParser):
+    """The links of a page: address, link text, and the words that stand before the
+    link in the same table row or list item.
+
+    Support pages often name a file in one cell and put a link that only says
+    "Download" in the next. The row is then the label of the link.
+    """
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.links: list[tuple[str, str]] = []
+        self.links: list[tuple[str, str, str]] = []
         self._href: str | None = None
         self._text: list[str] = []
+        self._row: list[str] | None = None
+        self._label = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() != "a":
+        tag = tag.lower()
+        if tag in {"tr", "li"}:
+            self._row = []
+        if tag != "a":
             return
         self._flush()
         self._href = dict(attrs).get("href")
         self._text = []
+        self._label = " ".join(" ".join(self._row or []).split())[:MAX_ROW_LABEL_CHARS]
 
     def handle_data(self, data: str) -> None:
-        if self._href is not None and len(self.links) < MAX_PAGE_LINKS:
-            self._text.append(data)
+        if self._href is not None:
+            if len(self.links) < MAX_PAGE_LINKS:
+                self._text.append(data)
+        elif self._row is not None and sum(map(len, self._row)) < MAX_ROW_LABEL_CHARS:
+            self._row.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() == "a":
+        tag = tag.lower()
+        if tag == "a":
             self._flush()
+        elif tag in {"tr", "li", "table", "ul", "ol"}:
+            self._row = None
 
     def _flush(self) -> None:
         if self._href is not None:
             text = " ".join(self._text).strip()
-            self.links.append((self._href, text))
+            self.links.append((self._href, text, self._label))
         self._href = None
         self._text = []
 
@@ -762,8 +785,8 @@ def _extract_pdf_links(
         return None
     maker = _compact(manufacturer)
     base_host = (urlparse(base_url).hostname or "").lower()
-    scored: list[tuple[int, str]] = []
-    for href, text in parser.links:
+    scored: list[tuple[int, int, str]] = []
+    for position, (href, text, row) in enumerate(parser.links):
         if not href:
             continue
         absolute = urljoin(base_url, href.strip())
@@ -776,20 +799,25 @@ def _extract_pdf_links(
         label = f"{text} {unquote(urlparse(absolute).path)}".lower()
         identity_match = _matches_identity(f"{text} {absolute}", model, variant)
         manual_term = any(term in label for term in MANUAL_LINK_TERMS)
-        if not identity_match and not manual_term:
+        # A link that only says "Download" is named by its table row or list item.
+        row_term = not manual_term and any(
+            term in row.lower().replace("\u2019", "'") for term in MANUAL_LINK_TERMS
+        )
+        if not identity_match and not manual_term and not row_term:
             continue
         score = 8 if identity_match else 0
-        if manual_term:
+        if manual_term or row_term:
             score += 4
         if maker and maker in _compact(label):
             score += 2
         if (urlparse(absolute).hostname or "").lower() == base_host:
             score += 1
-        scored.append((score, absolute))
+        scored.append((score, position, absolute))
     if not scored:
         return None
+    # Equal links are taken in page order: a product's own manual is listed first.
     scored.sort(key=lambda entry: (-entry[0], entry[1]))
-    return scored[0][1]
+    return scored[0][2]
 
 
 def _fetch_public_page(url: str, *, timeout: int) -> tuple[str, bytes, str, dict[str, str]] | None:

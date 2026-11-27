@@ -157,7 +157,7 @@ export function LoanDetailPage() {
                 {loan.item_id ? (
                   <Link
                     to={`/items/${loan.item_id}`}
-                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                    className="font-medium text-foreground underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                   >
                     {loan.item_name}
                   </Link>
@@ -264,7 +264,7 @@ export function LoanDetailPage() {
               {loan.item_id && (
                 <Link
                   to={`/items/${loan.item_id}`}
-                  className="text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  className="text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:inline-flex coarse:min-h-11 coarse:min-w-11 coarse:items-center"
                 >
                   <ArrowLeft className="mr-1 inline size-3" />
                   Item

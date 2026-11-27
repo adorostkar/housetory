@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pypdf import PdfReader
+from pypdf import PasswordType, PdfReader
 
 from ..api.errors import ApiError
 from ..config import get_settings
@@ -310,11 +310,13 @@ def store_entity_photo(
 def _validate_pdf(path: Path) -> None:
     try:
         reader = PdfReader(str(path), strict=False)
-        if reader.is_encrypted:
+        # Many maker manuals only carry owner restrictions (no printing, no copying)
+        # and open with an empty password. Only a PDF that needs a real password is refused.
+        if reader.is_encrypted and reader.decrypt("") == PasswordType.NOT_DECRYPTED:
             raise ApiError(
                 422,
                 "encrypted_document",
-                "Encrypted PDFs are not supported. Upload an unlocked copy.",
+                "Password-protected PDFs are not supported. Upload an unlocked copy.",
             )
         if len(reader.pages) < 1:
             raise ApiError(422, "invalid_document", "This PDF contains no pages.")

@@ -1092,6 +1092,46 @@ describe("AssistantPage", () => {
     expect(vi.mocked(api.post).mock.calls[0]?.[1]).not.toHaveProperty("page_context");
   });
 
+  it("keeps the page as the subject of a request handed over from the bar", async () => {
+    // With a real model, "Find the manual for this" typed in the bar on an item page
+    // reached the assistant without the item, and it asked "Which item do you mean?".
+    function ItemPageWithBarRequest() {
+      useRegisterAssistantPageContext([{ kind: "item", id: item.id, name: item.name }]);
+      return (
+        <AssistantPage
+          embedded
+          initialRequest={{ id: "from-bar", text: "Find the manual for this" }}
+          onInitialRequestHandled={() => undefined}
+        />
+      );
+    }
+    vi.mocked(createToolRun).mockReset().mockResolvedValue({
+      id: "run-bar", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Find the manual for this", state: "queued", generation: 1, steps: [],
+      message: "Waiting.", model_calls: 0, max_model_calls: 8, can_retry: false,
+      worker_available: true,
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[`/items/${item.id}`]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><ItemPageWithBarRequest /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(createToolRun).toHaveBeenCalledTimes(1));
+    const sent = vi.mocked(createToolRun).mock.calls[0]?.[0];
+    // A new topic: no earlier turn. But the page the user is on goes with it.
+    expect(sent).not.toHaveProperty("parent_id");
+    expect(sent?.page_context).toEqual([{ kind: "item", id: item.id }]);
+  });
+
   it("sends the visible page target by ID and retains it across a full-page handoff", async () => {
     function ContextFixture() {
       const navigate = useNavigate();

@@ -227,17 +227,27 @@ async function pageMetrics(page: import("@playwright/test").Page) {
         .filter((element) => visible(element) && element.getAttribute("aria-hidden") !== "true")
         .map((element) => {
           const rect = element.getBoundingClientRect();
-          // A small drawn control can have a larger tap area around it (the cross
-          // on the "This item" chip does). So the tap area is measured by asking
-          // which element is under points 44 px apart.
+          // A small drawn control can have a larger tap area than its box (the cross
+          // on the "This item" chip does, and it reaches to one side only). So the
+          // tap area is measured: walk outwards from the centre and count every
+          // point that the browser says belongs to this control.
           const tapped = (x: number, y: number) => {
             const hit = document.elementFromPoint(x, y);
             return hit !== null && (hit === element || element.contains(hit));
           };
           const centerX = rect.left + rect.width / 2;
           const centerY = rect.top + rect.height / 2;
-          const wide = tapped(centerX - 21.5, centerY) && tapped(centerX + 21.5, centerY);
-          const tall = tapped(centerX, centerY - 21.5) && tapped(centerX, centerY + 21.5);
+          const reach = (dx: number, dy: number) => {
+            let reached = 0;
+            for (let distance = 0.5; distance <= 44; distance += 0.5) {
+              if (!tapped(centerX + dx * distance, centerY + dy * distance)) break;
+              reached = distance;
+            }
+            return reached;
+          };
+          // Half a pixel is added back: a 44 px box reads as 43.5 in half-pixel steps.
+          const tapAcross = reach(-1, 0) + reach(1, 0) + 0.5;
+          const tapDown = reach(0, -1) + reach(0, 1) + 0.5;
           return {
             name: element.getAttribute("aria-label") || (element.textContent || "").trim(),
             left: rect.left,
@@ -246,8 +256,8 @@ async function pageMetrics(page: import("@playwright/test").Page) {
             bottom: rect.bottom,
             width: rect.width,
             height: rect.height,
-            tapWidth: Math.max(rect.width, wide ? 44 : 0),
-            tapHeight: Math.max(rect.height, tall ? 44 : 0),
+            tapWidth: Math.max(rect.width, tapAcross),
+            tapHeight: Math.max(rect.height, tapDown),
             font: Number.parseFloat(getComputedStyle(element).fontSize),
           };
         });
@@ -280,7 +290,7 @@ function shellProblems(metrics: ShellMetrics, expectBar: boolean): unknown[] {
     if (metrics.bar.length > 0) problems.push({ barShouldBeHidden: metrics.bar.map((entry) => entry.name) });
   } else {
     const names = metrics.bar.map((entry) => entry.name);
-    for (const needed of [/^(Hide|Show) rooms$/, /^Open assistant$/, /^Search or ask about your inventory$/, /^Add items$/]) {
+    for (const needed of [/^(Hide|Show) rooms$/, /^Open assistant(, \d+ unresolved reviews)?$/, /^Search or ask about your inventory$/, /^Add items$/]) {
       if (!names.some((name) => needed.test(name))) problems.push({ barMissing: String(needed), names });
     }
     const inOrder = [...metrics.bar].sort((first, second) => first.left - second.left);

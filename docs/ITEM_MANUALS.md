@@ -264,10 +264,21 @@ The steps of one conversation:
    model.
 5. The assistant searches. It gets the candidates that show the exact model,
    with the identifiers each source really shows. Similar models are left out.
-6. One candidate is the clear choice when it is the only one with a file, or
-   the only one with a file from the manufacturer or another official source.
-   The search code decides this, never the model. The tool prepares a
-   `save_manual` proposal for it.
+6. The search code picks the candidate to offer, never the model. Files of
+   the manufacturer come first, then files of other official sources, then
+   files of anybody else:
+   - One file in the best group is the clear choice. A file from another
+     site is the clear choice only when it is the only file and its source
+     names the manufacturer.
+   - Several files from the manufacturer or an official source: the first is
+     offered as a proposal for the user to review. Nobody is asked which
+     product it is.
+   - Several files from other sites, or none: nothing is offered and the user
+     chooses.
+
+   The tool prepares a `save_manual` proposal for the offered file. The list
+   of candidates on the item page uses the same order: manufacturer, official,
+   others.
 7. The clear choice is saved in the same task, without a card to apply, when
    all of this holds: the user asked to find, download, save or attach the
    manual; the user is an owner or member; and no text of a document or a web
@@ -682,6 +693,11 @@ not a PDF, the request fails clearly and the user can still upload a manual.
   fetched.
 - Filenames are reduced to a basename and passed through the existing storage
   sanitizer. Embedded references inside a PDF are never fetched.
+- A PDF that needs a password to open is refused, for uploads and downloads
+  alike. A PDF that only forbids printing or copying and opens without a
+  password is accepted; many manufacturers publish manuals like that.
+- On a landing page, a file link whose own text says little ("Download") is
+  named by the row of the table it stands in.
 - Search/download endpoints do not accept a URL from the browser as their
   destination; the operator-configured provider or a previously stored reviewed
   candidate is the only source. Downloaded text, queries and keys are not logged.

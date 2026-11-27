@@ -306,8 +306,16 @@ class ReviewScopeItemsOut(BaseModel):
     items: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ReviewDismissDraft(BaseModel):
+    """What the person had entered under "Edit first" before skipping the suggestion."""
+
+    name: trimmed(1, 200) | None = None
+    category_id: uuid.UUID | None = None
+
+
 class ReviewDismissRequest(BaseModel):
     reason: trimmed(0, 300) | None = None
+    draft: ReviewDismissDraft | None = None
 
 
 __all__ = [

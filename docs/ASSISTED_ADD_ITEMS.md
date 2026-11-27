@@ -53,6 +53,21 @@ opened row and can also be restored. A possible duplicate is not taken by
 **Select all**; the user decides it. Duplicate checks, inline room/place creation,
 purchase editing and the existing atomic apply/idempotency rules are unchanged.
 
+Inside the app shell, tapping a name, a quantity or another value on a closed
+row opens it in the bottom bar: Enter or ✓ saves, Escape or ✕ cancels. The
+same checks apply as in the row editor. A skipped row keeps its whole edited
+draft on the server, so Restore after a reload brings back every edit,
+including the chosen action and its target. A selected row has a background
+and a border as well as its checked box.
+
+A photo review numbers its findings. The vision request also asks for a box
+around each finding. A box that passes the server's checks
+(`services/recognition_geometry.py`) is returned as `source_region`
+(`x`, `y`, `width`, `height`, fractions of the shown photo) and drawn as a
+numbered pin linked to its row. A finding with no usable box has
+`source_region: null` and no pin, and the page says so. The server never
+makes a position up.
+
 ## Recognition adaptation
 
 Optional context text is bounded and passed to vision only inside an

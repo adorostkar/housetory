@@ -583,6 +583,76 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: "Apply change" })).toBeVisible();
   });
 
+  it("keeps an edit that was not applied through Skip, a reload and Restore", async () => {
+    const nameSuggestion: ReviewSuggestion = {
+      ...categorySuggestion, id: "suggestion-name", type: "name", action_kind: "apply_name",
+      title: "Tidy the name of cordless drill", category_id: null,
+      before: { name: "cordless drill" }, after: { name: "Cordless drill" }, evidence: {},
+    };
+    suggestions = [nameSuggestion];
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Edit first" }));
+    const field = screen.getByRole("textbox", { name: "Proposed name" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "Cordless drill 18V");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep for later" }));
+    // The edit is not lost when the dialog closes, and Skip sends it to be kept.
+    const card = screen.getByText("Tidy the name of cordless drill").closest("li")!;
+    expect(within(card).getByText("Cordless drill 18V").closest("li")).toHaveTextContent("Your edit: Cordless drill 18V");
+    await userEvent.click(within(card).getByRole("button", { name: "Skip" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-name/dismiss",
+        { draft: { name: "Cordless drill 18V" } },
+      ),
+    );
+
+    // After a reload and Restore the server gives the kept edit back with the row.
+    cleanup();
+    vi.mocked(api.post).mockClear();
+    suggestions = [{ ...nameSuggestion, evidence: { review_draft: { name: "Cordless drill 18V" } } }];
+    renderPage();
+    const restored = screen.getByText("Tidy the name of cordless drill").closest("li")!;
+    expect(within(restored).getByText("Cordless drill 18V")).toBeVisible();
+    await userEvent.click(within(restored).getByRole("button", { name: "Edit first" }));
+    expect(screen.getByRole("textbox", { name: "Proposed name" })).toHaveValue("Cordless drill 18V");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep for later" }));
+    // The row's own button applies the edit, not the first proposal.
+    await userEvent.click(within(restored).getByRole("button", { name: "Apply change" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-name/accept",
+        { name: "Cordless drill 18V" },
+      ),
+    );
+  });
+
+  it("forgets a kept edit when the proposal is put back", async () => {
+    const nameSuggestion: ReviewSuggestion = {
+      ...categorySuggestion, id: "suggestion-name", type: "name", action_kind: "apply_name",
+      title: "Tidy the name of cordless drill", category_id: null,
+      before: { name: "cordless drill" }, after: { name: "Cordless drill" }, evidence: {},
+    };
+    suggestions = [{ ...nameSuggestion, evidence: { review_draft: { name: "Cordless drill 18V" } } }];
+    renderPage();
+    const row = screen.getByText("Tidy the name of cordless drill").closest("li")!;
+    await userEvent.click(within(row).getByRole("button", { name: "Edit first" }));
+    const field = screen.getByRole("textbox", { name: "Proposed name" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "Cordless drill");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep for later" }));
+
+    expect(within(row).queryByText(/Your edit/)).toBeNull();
+    // Skip tells the server to forget the edit it kept.
+    await userEvent.click(within(row).getByRole("button", { name: "Skip" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-name/dismiss",
+        { draft: {} },
+      ),
+    );
+  });
+
   it("keeps duplicate findings advisory and opens a comparison", async () => {
     renderPage();
     const card = screen.getByText("Possible duplicate: Cordless drill").closest("li");

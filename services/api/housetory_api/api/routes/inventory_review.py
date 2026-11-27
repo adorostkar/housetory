@@ -296,6 +296,12 @@ def dismiss_review_suggestion(
             payload.reason if payload else None,
             actor_user_id=auth.user.id,
             actor_name=auth.user.name,
+            # An empty draft is a decision too: the person put the proposal back.
+            draft=(
+                payload.draft.model_dump(mode="json", exclude_none=True)
+                if payload and payload.draft is not None
+                else None
+            ),
         )
         db.commit()
     except Exception:

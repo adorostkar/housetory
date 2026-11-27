@@ -14,6 +14,7 @@ from .import_matching import build_index, find_duplicates
 from .import_parse import ProposalDraft, parse_location_phrases
 from .import_pipeline import _apply_context_destination, _context_property, to_proposed_item
 from .query_text import normalize_for_match
+from .recognition_geometry import stored_region
 
 
 def create_batch_from_recognition(
@@ -136,6 +137,7 @@ def create_batch_from_recognition(
             ]
         destination_phrases = grounded
 
+    located: list[tuple[ImportEntry, dict]] = []
     for position, suggestion in enumerate(suggestions):
         review_reason = suggestion.get("review_reason")
         relationships = dict(suggestion.get("relationships") or {})
@@ -166,21 +168,30 @@ def create_batch_from_recognition(
         proposed = to_proposed_item(draft, index)
         proposed = _apply_context_destination(db, batch, proposed)
         duplicates = find_duplicates(db, household_id, proposed)
-        db.add(
-            ImportEntry(
-                batch_id=batch.id,
-                source_path=draft.source_path,
-                source_excerpt=draft.source_excerpt,
-                note_title=draft.note_title,
-                proposed=proposed.model_dump(mode="json"),
-                field_sources=proposed.field_sources,
-                confidence=proposed.confidence,
-                duplicate_candidates=[
-                    candidate.model_dump(mode="json") for candidate in duplicates
-                ],
-                position=position,
-            )
+        entry = ImportEntry(
+            batch_id=batch.id,
+            source_path=draft.source_path,
+            source_excerpt=draft.source_excerpt,
+            note_title=draft.note_title,
+            proposed=proposed.model_dump(mode="json"),
+            field_sources=proposed.field_sources,
+            confidence=proposed.confidence,
+            duplicate_candidates=[candidate.model_dump(mode="json") for candidate in duplicates],
+            position=position,
         )
+        db.add(entry)
+        region = stored_region(suggestion.get("source_region"))
+        if region is not None:
+            located.append((entry, region.model_dump(mode="json")))
+
+    if located:
+        # Kept beside the entries, by entry id, so that edits, skip and restore (which
+        # rewrite an entry's own JSON) cannot lose or change a position.
+        db.flush()
+        batch.metadata_json = {
+            **(batch.metadata_json or {}),
+            "_source_regions": {str(entry.id): region for entry, region in located},
+        }
 
     recognition.result = {
         **(recognition.result or {}),

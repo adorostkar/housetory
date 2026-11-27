@@ -116,8 +116,9 @@ class OnlineManualArguments(Arguments):
     save_clear_match: bool = Field(
         default=False,
         description=(
-            "True only when the user asked to find, download, save or attach the manual: "
-            "the one clear match is then saved. False for a question that needs a manual."
+            "True when the request is for the manual itself (find, get, download, save or "
+            "attach it): the one clear match is then saved. False for a question that "
+            "only needs a manual."
         ),
     )
 

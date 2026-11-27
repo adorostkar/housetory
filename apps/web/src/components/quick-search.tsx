@@ -714,8 +714,9 @@ export function QuickSearch({
               type="button"
               aria-label={`Remove ${context.label.toLowerCase()} from the question: ${context.name}`}
               title="Ask about everything instead"
-              // The visible cross is small; the padding around it makes the target 44 px.
-              className="relative flex size-8 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-1.5 before:content-[''] hover:bg-background/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              // The visible cross is small. Its tap area is 44 px: it reaches over the
+              // chip's own label and above and below, never over the field beside it.
+              className="relative flex size-8 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-y-1.5 before:-left-3 before:right-0 before:content-[''] hover:bg-background/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
               onClick={() => {
                 pageContext?.setReferences([]);
                 inputRef.current?.focus();
@@ -767,7 +768,7 @@ export function QuickSearch({
           onKeyDown={onKeyDown}
           disabled={recorder.recording || voiceProcessing || pendingRecording}
           aria-describedby={voiceNotice ? voiceNoticeId : undefined}
-          className="quick-search-input h-full min-w-11 flex-1 bg-transparent px-1.5 text-[1rem] text-foreground outline-none placeholder:text-muted-foreground lg:text-[0.95rem]"
+          className="quick-search-input h-full min-w-12 flex-1 bg-transparent px-1.5 text-[1rem] text-foreground outline-none placeholder:text-muted-foreground lg:text-[0.95rem]"
         />
         {onAttach && (
           <>

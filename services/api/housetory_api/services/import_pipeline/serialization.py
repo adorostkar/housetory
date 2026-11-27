@@ -17,6 +17,7 @@ from ...schemas.imports import (
     ImportSourceFileOut,
     ProposedItem,
 )
+from ..recognition_geometry import stored_region
 
 
 def _safe_error(exc: Exception) -> str:
@@ -49,7 +50,11 @@ def _safe_error(exc: Exception) -> str:
     return "Import processing failed. Check the source file and try again."
 
 
-def serialize_import_entry(entry: ImportEntry) -> ImportEntryOut:
+def serialize_import_entry(
+    entry: ImportEntry, source_regions: dict | None = None
+) -> ImportEntryOut:
+    if source_regions is None:
+        source_regions = (entry.batch.metadata_json or {}).get("_source_regions")
     return ImportEntryOut(
         id=entry.id,
         source_file_id=entry.source_file_id,
@@ -74,6 +79,8 @@ def serialize_import_entry(entry: ImportEntry) -> ImportEntryOut:
         legacy_identifier=entry.legacy_identifier,
         error=entry.error,
         position=entry.position,
+        # Only a photo recognition has positions; every other entry has none.
+        source_region=stored_region((source_regions or {}).get(str(entry.id))),
     )
 
 
@@ -132,7 +139,10 @@ def serialize_batch(db: Session, batch: ImportBatch) -> ImportBatchDetail:
     metadata = batch.metadata_json or {}
     return ImportBatchDetail(
         **base.model_dump(),
-        entries=[serialize_import_entry(entry) for entry in entries],
+        entries=[
+            serialize_import_entry(entry, metadata.get("_source_regions") or {})
+            for entry in entries
+        ],
         files=[serialize_source_file(source) for source in files],
         vault_tree=metadata.get("vault_tree") or [],
         ignored_notes=metadata.get("ignored_notes") or [],

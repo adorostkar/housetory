@@ -381,7 +381,7 @@ export function ContainersPage() {
                   allSelected ? new Set() : new Set(containers.map((entry) => entry.id)),
                 )
               }
-              className="font-medium text-foreground/75 underline-offset-4 hover:underline"
+              className="font-medium text-foreground/75 underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
             >
               {allSelected ? "Clear selection" : "Select all"}
             </button>
@@ -565,13 +565,16 @@ function ContainerCard({
     >
       <div className="flex items-start gap-3">
         {canWrite && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggle}
-            aria-label={`Select ${identifier}`}
-            className="mt-1 size-4 shrink-0 accent-primary"
-          />
+          // On touch the label is the 44 px tap area around the small box.
+          <label className="flex shrink-0 cursor-pointer coarse:-ml-2.5 coarse:-mt-2.5 coarse:size-11 coarse:items-center coarse:justify-center">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggle}
+              aria-label={`Select ${identifier}`}
+              className="mt-1 size-4 shrink-0 accent-primary coarse:mt-0"
+            />
+          </label>
         )}
         <Link to={`/containers/${container.id}`} className="min-w-0 flex-1 group">
           <div className="flex flex-wrap items-center gap-2">

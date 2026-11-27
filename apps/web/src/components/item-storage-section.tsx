@@ -203,7 +203,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
                     <ChevronRight className="size-3" />
                     <Link
                       to={`/rooms/${item.room.id}`}
-                      className="underline-offset-4 hover:underline"
+                      className="underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                     >
                       {item.room.name}
                     </Link>
@@ -218,7 +218,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
                           ? `/containers/${entry.id}`
                           : `/rooms/${item.room?.id}?location_id=${entry.id}`
                       }
-                      className="underline-offset-4 hover:underline"
+                      className="underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                     >
                       {locationLabel(entry)}
                     </Link>

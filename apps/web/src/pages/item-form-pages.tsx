@@ -26,7 +26,8 @@ function FormHeader({
   return (
     <header className="mb-4">
       <ItemPageClose to={backTo} label={backLabel} presentation={presentation} />
-      <h1 className="display-title-compact mt-1 [overflow-wrap:anywhere]">{title}</h1>
+      {/* On touch a little more room: the tall letters of the title reach up into the link above. */}
+      <h1 className="display-title-compact mt-1 [overflow-wrap:anywhere] coarse:mt-2">{title}</h1>
       <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
         {description}
       </p>

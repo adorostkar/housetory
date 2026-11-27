@@ -125,7 +125,6 @@ def _headers(token: str) -> dict[str, str]:
     return {"Cookie": f"housetory_session={token}"}
 
 
-
 class ServiceResult:
     """A service call's outcome, shaped like an HTTP response for the assertions."""
 
@@ -1178,7 +1177,9 @@ def test_lines_can_be_applied_in_parts_without_a_second_purchase_or_item(owner_c
     # Restore puts the line back as pending. Applying it finishes the purchase.
     restored = owner_client.post(f"{review_url}/lines/{lamp['id']}/restore")
     assert restored.status_code == 200, restored.text
-    assert lamp["id"] not in restored.json()["line_states"]
+    # The restored line waits again. What was kept with the skip is still there.
+    assert restored.json()["line_states"][lamp["id"]]["status"] == "pending"
+    assert restored.json()["line_states"][lamp["id"]]["description"] == "Work lamp, LED"
     third_payload = request([create(lamp, "Work lamp")])
     third = owner_client.post(apply_url, json=third_payload)
     assert third.status_code == 200, third.text
@@ -1217,3 +1218,161 @@ def test_lines_can_be_applied_in_parts_without_a_second_purchase_or_item(owner_c
     assert again.status_code == 200, again.text
     assert again.json()["purchase_id"] != purchase_id
     assert counts()["purchases"] == 2
+
+
+def test_skipped_line_keeps_its_complete_draft_through_reload_and_restore(owner_client):
+    room = create_room(owner_client)
+    existing = create_item(owner_client, name="Paint Roller", room_id=room["id"], quantity=1)
+    document = upload_document(owner_client, THREE_LINE_RECEIPT)
+    extraction = ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT).json()
+    _ladder, roller, lamp = [line for line in extraction["lines"] if line["kind"] == "product"]
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+
+    # The whole row as the review holds it: amounts, the action and its target, the
+    # new item with its place, the updates, the stock choice and the warranty.
+    lamp_draft = {
+        "description": "Work lamp, LED",
+        "quantity": "1",
+        "unitPrice": "150.00",
+        "lineTotal": "140.00",
+        "action": "create",
+        "itemId": "",
+        "addQuantity": False,
+        "newItem": {
+            "name": "LED work lamp",
+            "brand": "Osram",
+            "model": "L-100",
+            "serialNumber": "SN-LAMP-9",
+            "roomId": room["id"],
+            "locationId": "",
+        },
+        "updates": {
+            "name": "",
+            "brand": "",
+            "model": "",
+            "serialNumber": "",
+            "roomId": "",
+            "locationId": "",
+        },
+        "warranty": {
+            "enabled": True,
+            "provider": "Osram",
+            "startDate": "",
+            "endDate": "2029-02-14",
+            "months": "",
+        },
+    }
+    roller_draft = {
+        "description": "Paint roller, wide",
+        "quantity": "2",
+        "unitPrice": "25.00",
+        "lineTotal": "50.00",
+        "action": "update",
+        "itemId": existing["id"],
+        "addQuantity": True,
+        "newItem": {
+            "name": "Paint Roller",
+            "brand": "",
+            "model": "",
+            "serialNumber": "",
+            "roomId": "",
+            "locationId": "",
+        },
+        "updates": {
+            "name": "Paint roller XL",
+            "brand": "Anza",
+            "model": "",
+            "serialNumber": "",
+            "roomId": "",
+            "locationId": "",
+        },
+        "warranty": {
+            "enabled": False,
+            "provider": "",
+            "startDate": "",
+            "endDate": "",
+            "months": "",
+        },
+        "candidate": {"id": existing["id"], "name": "Paint Roller"},
+    }
+    drafts = {lamp["id"]: lamp_draft, roller["id"]: roller_draft}
+    for line_id, draft in drafts.items():
+        skipped = owner_client.post(
+            f"{review_url}/lines/{line_id}/skip",
+            json={"description": draft["description"], "quantity": 1, "draft": draft},
+        )
+        assert skipped.status_code == 200, skipped.text
+
+    # Reload while skipped, then Restore, then another reload: the draft is the same
+    # every time. Restore does not delete it.
+    states = owner_client.get(review_url).json()["line_states"]
+    for line_id, draft in drafts.items():
+        assert states[line_id]["status"] == "skipped"
+        assert states[line_id]["draft"] == draft
+        assert owner_client.post(f"{review_url}/lines/{line_id}/restore").status_code == 200
+    for _reload in range(2):
+        states = owner_client.get(review_url).json()["line_states"]
+        for line_id, draft in drafts.items():
+            assert states[line_id]["status"] == "pending"
+            assert states[line_id]["draft"] == draft
+
+    # Applying what the restored drafts say gives records with the edited values.
+    kept_lamp, kept_roller = states[lamp["id"]]["draft"], states[roller["id"]]["draft"]
+    applied = owner_client.post(
+        f"{review_url}/apply",
+        json={
+            "request_id": str(uuid.uuid4()),
+            "extraction_version": extraction["version"],
+            "purchase_action": "create",
+            "purchase": {"merchant": "Corner Hardware", "price_cents": 30000, "currency": "USD"},
+            "lines": [
+                {
+                    "line_id": lamp["id"],
+                    "action": kept_lamp["action"],
+                    "quantity": int(kept_lamp["quantity"]),
+                    "line_total_cents": 14000,
+                    "new_item": {
+                        "name": kept_lamp["newItem"]["name"],
+                        "quantity": int(kept_lamp["quantity"]),
+                        "brand": kept_lamp["newItem"]["brand"],
+                        "model": kept_lamp["newItem"]["model"],
+                        "serial_number": kept_lamp["newItem"]["serialNumber"],
+                        "room_id": kept_lamp["newItem"]["roomId"],
+                    },
+                    "warranty": {
+                        "provider": kept_lamp["warranty"]["provider"],
+                        "end_date": kept_lamp["warranty"]["endDate"],
+                    },
+                },
+                {
+                    "line_id": roller["id"],
+                    "action": kept_roller["action"],
+                    "item_id": kept_roller["itemId"],
+                    "add_quantity": kept_roller["addQuantity"],
+                    "quantity": int(kept_roller["quantity"]),
+                    "updates": {
+                        "name": kept_roller["updates"]["name"],
+                        "brand": kept_roller["updates"]["brand"],
+                    },
+                },
+            ],
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    created = owner_client.get(f"/api/v1/items/{applied.json()['created_item_ids'][0]}").json()
+    created = created["item"]
+    assert created["name"] == "LED work lamp"
+    assert (created["brand"], created["model"], created["serial_number"]) == (
+        "Osram",
+        "L-100",
+        "SN-LAMP-9",
+    )
+    assert created["room"]["id"] == room["id"]
+    assert created["warranty"]["end_date"] == "2029-02-14"
+    updated = owner_client.get(f"/api/v1/items/{existing['id']}").json()["item"]
+    assert (updated["name"], updated["brand"]) == ("Paint roller XL", "Anza")
+    assert updated["quantity"] == 3
+    purchase = owner_client.get(f"/api/v1/purchases/{applied.json()['purchase_id']}").json()
+    assert purchase["allocated_total_cents"] == 14000 + 5000
+    states = owner_client.get(review_url).json()["line_states"]
+    assert {states[lamp["id"]]["status"], states[roller["id"]]["status"]} == {"applied"}

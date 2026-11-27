@@ -113,6 +113,18 @@ SKIPS_KEY = "extraction_line_skips"
 APPLIED_LINES_KEY = "extraction_applied_lines"
 
 
+def _skipped_line_ids(metadata: dict[str, Any]) -> set[str]:
+    """Lines that are skipped now. A restored line keeps its draft but waits again."""
+    skips = metadata.get(SKIPS_KEY)
+    if not isinstance(skips, dict):
+        return set()
+    return {
+        str(line_id)
+        for line_id, marker in skips.items()
+        if isinstance(marker, dict) and not marker.get("restored_at")
+    }
+
+
 def has_pending_lines(metadata: dict[str, Any] | None) -> bool:
     """True while a partly applied document has a product line that is neither applied nor skipped.
 
@@ -131,9 +143,7 @@ def has_pending_lines(metadata: dict[str, Any] | None) -> bool:
     if not isinstance(extraction, dict):
         return False
     settled = {str(line_id) for line_id in marker.get("line_ids") or []}
-    skips = metadata.get(SKIPS_KEY)
-    if isinstance(skips, dict):
-        settled.update(skips)
+    settled.update(_skipped_line_ids(metadata))
     return any(
         line.get("kind") == "product" and str(line.get("id")) not in settled
         for line in extraction.get("lines", [])
@@ -221,11 +231,12 @@ def line_states(db: Session, document: Document) -> tuple[dict[str, dict[str, An
             if line_id in states or not isinstance(marker, dict):
                 continue
             states[line_id] = {
-                "status": "skipped",
+                "status": "pending" if marker.get("restored_at") else "skipped",
                 "at": marker.get("at"),
                 "description": marker.get("description"),
                 "quantity": marker.get("quantity"),
                 "line_total_cents": marker.get("line_total_cents"),
+                "draft": marker.get("draft"),
             }
     return states, applied_version(applies)
 
@@ -252,7 +263,11 @@ def change_line_skip(
     metadata = dict(document.extracted_metadata or {})
     skips = dict(metadata.get(SKIPS_KEY) or {})
     if restore:
-        skips.pop(line_id, None)
+        # The line waits again. Its saved draft stays, so that the row comes back as it
+        # was edited, also after another reload.
+        marker = skips.get(line_id)
+        if isinstance(marker, dict):
+            skips[line_id] = {**marker, "restored_at": datetime.now(UTC).isoformat()}
     else:
         if line_id not in _known_line_ids(document):
             raise ApiError(

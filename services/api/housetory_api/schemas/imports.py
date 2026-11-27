@@ -2,10 +2,30 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..schemas.common import Description, ORMModel, trimmed
 from .enrichment import EnhancementState
+
+
+class SourceRegion(BaseModel):
+    """Where a recognised thing is on the photo the review shows.
+
+    All four numbers are fractions of that photo. x and y are the top-left corner.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _inside_photo(self) -> "SourceRegion":
+        if self.x + self.width > 1 + 1e-9 or self.y + self.height > 1 + 1e-9:
+            raise ValueError("The region must lie inside the photo.")
+        return self
 
 
 class LocationCandidate(BaseModel):
@@ -142,6 +162,7 @@ class ImportEntryOut(ORMModel):
     legacy_identifier: str | None = None
     error: str | None
     position: int
+    source_region: SourceRegion | None = None
 
 
 class ImportBatchOut(ORMModel):

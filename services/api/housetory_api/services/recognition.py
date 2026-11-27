@@ -27,6 +27,7 @@ from . import ai, storage
 from .import_matching import find_duplicates
 from .items import create_item_record, get_item, resolve_location, update_item_record
 from .ocr import extract_text, parse_receipt
+from .recognition_geometry import checked_regions, take_model_boxes, vision_image
 
 logger = logging.getLogger("housetory.recognition")
 
@@ -36,7 +37,15 @@ AI_RECOGNITION_SYSTEM = """Identify clearly visible, movable household possessio
 Return JSON exactly shaped as:
 {"is_document":false,"document_type":null,"destination_phrases":[],"suggestions":[{"name":"...","quantity":1,"description":null,"category":null,"brand":null,
 "model":null,"tags":[],"notes":null,"confidence":0,"review":false,"review_reason":null,
-"field_sources":{"name":"inferred"}}],"warnings":[]}
+"field_sources":{"name":"inferred"},"box":null}],"warnings":[]}
+box says where the suggestion is in the image. It is null or
+{"x_min":number,"y_min":number,"x_max":number,"y_max":number}: a tight rectangle
+around the thing, as fractions from 0 to 1 of the image. x is measured from the left
+edge as a share of the image width, y from the top edge as a share of the image
+height, so x_min < x_max and y_min < y_max. When quantity is above 1 the box
+surrounds all of them if they are next to each other; use null if they are apart.
+Give a box only when you can see where the thing is. Use null when you are not
+sure. Never guess a box.
 If the image is mainly a paper or screen document (receipt, invoice, order
 confirmation, warranty card, manual page) set is_document=true, set document_type to
 receipt, invoice, warranty_certificate, manual or other, and return no suggestions:
@@ -349,17 +358,25 @@ def run_recognition(
                             "do not add unrelated off-image objects.\n<untrusted_context>\n"
                             f"{context_text[:10_000]}\n</untrusted_context>"
                         )
+                    vision_path, vision_mime, same_view = vision_image(recognition, source_path)
                     raw = ai.complete_json(
                         AI_RECOGNITION_SYSTEM,
                         user_prompt,
-                        image_path=source_path,
-                        image_mime=recognition.original_content_type,
+                        image_path=vision_path,
+                        image_mime=vision_mime,
                         config=ai.config_for(db, recognition.household_id, AiTask.VISION.value),
                     )
+                    boxes = take_model_boxes(raw)
                     result = AiRecognitionResult.model_validate(raw)
                     vision_succeeded = True
                     if result.is_document:
                         result.suggestions = []
+                    if same_view:
+                        regions = checked_regions(
+                            boxes[: len(result.suggestions)], findings=len(result.suggestions)
+                        )
+                        for suggestion, region in zip(result.suggestions, regions, strict=False):
+                            suggestion.source_region = region
                     _review_fixed_features(result.suggestions)
                     confidence = result.suggestions[0].confidence if result.suggestions else None
                     if not result.suggestions:

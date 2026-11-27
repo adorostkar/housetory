@@ -334,6 +334,40 @@ def test_manual_identity_gate_and_exact_model_candidates(owner_client, monkeypat
     assert unconfigured.json()["detail"]["code"] == "manual_search_unconfigured"
 
 
+def test_candidates_list_the_maker_first_then_official_then_others(owner_client, monkeypatch):
+    """One search stores its candidates in one moment, so time gives no order."""
+    item = create_item(owner_client, "Ordered drill")
+    assert confirmed_profile(owner_client, item["id"]).status_code == 200
+    configure_search(monkeypatch)
+
+    def result(title, host, source_type):
+        return {
+            "title": title,
+            "source_url": f"https://{host}/DCD791B",
+            "file_url": f"https://{host}/DCD791B.pdf",
+            "source_type": source_type,
+            "model_coverage": ["DCD791", "DCD791B"],
+        }
+
+    monkeypatch.setattr(
+        manual_web,
+        "_post_search",
+        lambda payload, **kwargs: {
+            "results": [
+                result("A shop copy of the DCD791B manual", "shop.example", "other"),
+                result("B library copy of the DCD791B manual", "library.example", "official"),
+                result("C DeWalt DCD791B instruction manual", "www.dewalt.example", "manufacturer"),
+            ]
+        },
+    )
+    expected = ["manufacturer", "official", "other"]
+    searched = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+    assert searched.status_code == 200, searched.text
+    assert [entry["source_type"] for entry in searched.json()["candidates"]] == expected
+    listed = owner_client.get(f"/api/v1/items/{item['id']}/manual-search").json()
+    assert [entry["source_type"] for entry in listed["candidates"]] == expected
+
+
 def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
     owner_client, monkeypatch, pdf_bytes
 ):
@@ -951,6 +985,61 @@ def test_pdf_link_discovery_uses_actual_anchor_links_only():
             manufacturer="DeWalt",
             model="DCD791",
             variant="B",
+        )
+        is None
+    )
+
+
+# Shaped like a real manufacturer support page (Brother, November 2026): the name of each
+# file stands in one table cell and its link only says "Download".
+SUPPORT_TABLE_PAGE = """
+<html><body><table>
+<tr><td><div><img alt="PDF"></div><div><em>Reference Guide</em></div></td>
+  <td>Brief explanations for routine operations</td><td><em>02/01/2022<br>(B)</em></td>
+  <td><a href="https://download.example.com/welcome/doc100775/cv_hll2310d_use_rg_b.pdf"
+    class="button">Download</a><br><em>(1.18MB)</em></td></tr>
+<tr><td><div><em>Online User's Guide (HTML)</em></div></td><td>For learning the operations.</td>
+  <td><a href="/g/s/id/htmldoc/printer/cv_hll2310d/use/index.html">View</a></td></tr>
+<tr><td><div><em>Online User’s Guide</em></div></td>
+  <td>For learning the operations, routine maintenance and troubleshooting tips.</td>
+  <td><a href="https://download.example.com/welcome/doc100810/cv_hll2310d_use_oug_d.pdf"
+    class="button">Download</a><br><em>(5.35MB)</em></td></tr>
+<tr><td><div><em>Quick Setup Guide</em></div></td><td>For the installation of the product.</td>
+  <td><a href="https://download.example.com/welcome/doc100770/cv_hll2350dw_use_qsg_c.pdf"
+    >Download</a></td></tr>
+<tr><td><div><em>Mass Deployment Tool User's Guide</em></div></td>
+  <td>For administrators of many Brother network devices.</td>
+  <td><a href="https://download.example.com/welcome/doc100735/eng_mdt_p.pdf">Download</a></td></tr>
+</table>
+<p>See the manual list.</p><a href="https://download.example.com/welcome/licence.pdf">Download</a>
+</body></html>
+"""
+
+
+def test_a_link_that_only_says_download_is_named_by_its_table_row():
+    """A real search found the manufacturer's page, but none of its PDFs: every link said
+    "Download". Only a retailer's copy was offered."""
+    found = manual_web._extract_pdf_links(
+        SUPPORT_TABLE_PAGE,
+        base_url="https://support.example.com/g/b/manualtop.aspx?prod=hll2350dw_us_eu_as",
+        manufacturer="Brother",
+        model="HL-L2350DW",
+        variant=None,
+    )
+    # The first row that is named as the user's guide wins: not the reference guide
+    # before it, not a tool's guide after it, and not a link outside any row.
+    assert found == "https://download.example.com/welcome/doc100810/cv_hll2310d_use_oug_d.pdf"
+    # A row that names no manual gives its link no name.
+    plain = SUPPORT_TABLE_PAGE.replace("User's Guide", "Notes").replace(
+        "User\u2019s Guide", "Notes"
+    )
+    assert (
+        manual_web._extract_pdf_links(
+            plain,
+            base_url="https://support.example.com/g/b/manualtop.aspx",
+            manufacturer="Brother",
+            model="HL-L2350DW",
+            variant=None,
         )
         is None
     )

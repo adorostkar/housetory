@@ -896,7 +896,7 @@ function ItemFormFields(props: ItemFormProps) {
                           )
                         }
                         className={cn(
-                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-2xs transition-colors",
+                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-2xs transition-colors coarse:min-h-11",
                           selected
                             ? "border-primary bg-primary text-primary-foreground"
                             : "border-border bg-card/60 text-muted-foreground hover:border-foreground/25 hover:text-foreground",
@@ -929,13 +929,13 @@ function ItemFormFields(props: ItemFormProps) {
                       }
                     }}
                     placeholder="Add a tag"
-                    className="h-9 text-xs"
+                    className="h-9 text-xs coarse:h-11"
                   />
                   <Button
                     type="button"
                     variant="outline"
                     size="icon-sm"
-                    className="size-9"
+                    className="size-9 coarse:size-11"
                     aria-label="Create tag"
                     disabled={createTag.isPending || !newTag.trim()}
                     onClick={addTagFromInput}

@@ -9,6 +9,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
+import { BarEditorBoundary } from "@/components/shell/bar-editor";
 import { BottomBar } from "@/components/shell/bottom-bar";
 import { RoomRail, SidebarNav, useRailModel } from "@/components/shell/room-rail";
 import { ShellProvider, useRememberedRail } from "@/components/shell/shell-context";
@@ -110,9 +111,11 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const [railOpen, setRailOpen] = useRememberedRail();
   const [assistantTall, setAssistantTall] = useState(false);
   const [barFocused, setBarFocused] = useState(false);
+  const [barEditing, setBarEditing] = useState(false);
   // The keyboard is open for a field on the page, not for the bar. The bar steps
   // aside so the field and its Save button have the room, as a tab bar would.
-  const typingOnPage = softwareKeyboardOpen && !barFocused;
+  // The bar editor stands where the bar stands, so it counts as the bar here.
+  const typingOnPage = softwareKeyboardOpen && !barFocused && !barEditing;
   const rail = useRailModel();
   useKeyboardInset();
   useEffect(() => {
@@ -311,14 +314,15 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const compact = !desktop;
   const showRail = compact && railOpen;
   // The assistant has its own message field, so the bar steps aside for it on the phone.
-  const showBar = !(compact && (assistantOpen || typingOnPage));
+  // A value being changed through the bar takes the bar's place until it is saved.
+  const showBar = !barEditing && !(compact && (assistantOpen || typingOnPage));
 
   return (
     <ShellProvider value={{ compact, railOpen, setRailOpen }}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
       <aside data-always-on-screen className="sticky top-0 hidden h-dvh flex-col border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
         <div className="flex items-center px-2">
-          <Link to="/items" aria-label="Housetory, all items">
+          <Link to="/items" aria-label="Housetory, all items" className="coarse:flex coarse:min-h-11 coarse:items-center">
             <BrandMark />
           </Link>
         </div>
@@ -336,7 +340,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
         <RoomRail
           model={rail}
           className="fixed left-0 top-0 z-30"
-          style={{ bottom: `calc(${showBar ? "var(--shell-bar-height, 0px)" : "0px"} + var(--keyboard-inset, 0px))` }}
+          style={{ bottom: `calc(${showBar || barEditing ? "var(--shell-bar-height, 0px)" : "0px"} + var(--keyboard-inset, 0px))` }}
         />
       )}
 
@@ -344,6 +348,17 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
         className={cn("flex min-h-dvh min-w-0 flex-col", showRail && "pl-[4.125rem]")}
         style={itemPanel ? { paddingRight: PANEL_WIDTH } : undefined}
       >
+        <BarEditorBoundary
+          onActiveChange={setBarEditing}
+          resetKey={mainLocation.pathname}
+          editorClassName={cn(
+            "z-[45]",
+            compact
+              ? "fixed inset-x-0 bottom-[var(--keyboard-inset,0px)] px-2 pt-2"
+              : "sticky bottom-0 px-12 pb-4 pt-3",
+            compact && (softwareKeyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]"),
+          )}
+        >
         <main
           className={cn(
             "mx-auto w-full max-w-[1320px] flex-1 px-4 sm:px-8 lg:px-12",
@@ -393,6 +408,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
               />
             )}
         </BottomBar>
+        </BarEditorBoundary>
       </div>
       {itemPanel && (
         <aside
@@ -422,6 +438,11 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
           style={{ "--item-panel": itemPanel ? PANEL_WIDTH : "0px" } as React.CSSProperties}
           onOpenAutoFocus={(event) => { event.preventDefault(); assistantHeading.current?.focus(); }}
           onCloseAutoFocus={(event) => { event.preventDefault(); }}
+          onEscapeKeyDown={(event) => {
+            // Escape closes the innermost open thing first: the editor of a review
+            // value at the foot of the assistant, then the assistant.
+            if (document.activeElement?.closest('[data-testid="bar-editor"]')) event.preventDefault();
+          }}
           onInteractOutside={(event) => {
             // Desktop: the box stays open while the page is used. Phone: the tap that
             // opened the sheet can be followed by a second, late event above the sheet.
@@ -474,6 +495,8 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             </div>
           </div>
           <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+            {/* A review shown in the assistant edits its values in a bar at the foot of this surface. */}
+            <BarEditorBoundary editorClassName="absolute inset-x-0 bottom-0 z-10 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 lg:rounded-b-2xl">
             <Suspense fallback={<PageFallback />}>
               <AssistantPage
                 embedded
@@ -484,6 +507,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
                 }}
               />
             </Suspense>
+            </BarEditorBoundary>
           </div>
         </DialogPrimitive.Content>
         </DialogPrimitive.Portal>

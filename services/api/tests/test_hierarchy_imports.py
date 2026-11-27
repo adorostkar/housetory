@@ -263,3 +263,105 @@ def test_hierarchy_duplicate_prevention_and_override(owner_client):
     assert allowed.status_code == 200, allowed.text
     assert allowed.json()["failed"] == 0
     assert owner_client.get("/api/v1/items?limit=100").json()["total"] == before + 1
+
+
+def test_hierarchy_skip_reload_restore_keeps_edits_type_parent_and_duplicate_choice(owner_client):
+    batch = upload_markdown(owner_client)
+    detail = process(owner_client, batch["id"])
+    entries = detail["entries"]
+    sto02 = next(entry for entry in entries if entry["legacy_identifier"] == "STO-02")
+    ethernet = next(entry for entry in entries if entry["proposed"]["name"] == "Ethernet cables")
+    batch_url = f"/api/v1/imports/{batch['id']}"
+    edited = {
+        **ethernet["proposed"],
+        "name": "Long Ethernet cable",
+        "quantity": 8,
+        "description": "Cat 6, grey",
+    }
+    skipped = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {
+                    "id": ethernet["id"],
+                    "action": "skip",
+                    "entity_type": "item",
+                    "parent_entry_id": sto02["id"],
+                    "legacy_identifier": "CAB-1",
+                    "allow_duplicate": True,
+                    "proposed": edited,
+                }
+            ]
+        },
+    )
+    assert skipped.status_code == 200, skipped.text
+
+    def fetch():
+        fetched = owner_client.get(batch_url).json()["entries"]
+        return next(entry for entry in fetched if entry["id"] == ethernet["id"])
+
+    after_skip = fetch()
+    assert after_skip["status"] == "skipped"
+    for key in ("name", "quantity", "description"):
+        assert after_skip["proposed"][key] == edited[key]
+    draft = after_skip["proposed"]["relationships"]["review_draft"]
+    assert draft == {
+        "action": "import",
+        "merge_item_id": None,
+        "merge_fields": [],
+        "allow_duplicate": True,
+        "entity_type": "item",
+        "parent_entry_id": sto02["id"],
+        "legacy_identifier": "CAB-1",
+    }
+
+    assert owner_client.post(f"{batch_url}/entries/{ethernet['id']}/restore").status_code == 200
+    after_restore = fetch()
+    assert after_restore["status"] == "proposed"
+    assert after_restore["proposed"] == after_skip["proposed"]
+
+    # The destination branch is added first; the restored record then goes into the
+    # parent that was chosen before the skip, with its edited values.
+    branch = [sto02] + [
+        entry
+        for entry in entries
+        if entry["entity_type"] == "room"
+        and entry["proposed"]["name"] in {"Storage", "Storage room 2"}
+    ]
+    applied = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {
+                    "id": entry["id"],
+                    "action": "import",
+                    "entity_type": entry["entity_type"],
+                    "parent_entry_id": entry["parent_entry_id"],
+                }
+                for entry in branch
+            ]
+            + [
+                {
+                    "id": ethernet["id"],
+                    "action": "import",
+                    "entity_type": draft["entity_type"],
+                    "parent_entry_id": draft["parent_entry_id"],
+                    "allow_duplicate": draft["allow_duplicate"],
+                }
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["failed"] == 0, applied.json()
+    item = next(
+        entry
+        for entry in owner_client.get("/api/v1/items?limit=100").json()["items"]
+        if entry["name"] == "Long Ethernet cable"
+    )
+    assert item["quantity"] == 8
+    sto02_location = next(
+        entry
+        for entry in owner_client.get("/api/v1/containers?limit=200").json()["items"]
+        if entry["legacy_identifier"] == "STO-02"
+    )
+    assert item["location"]["id"] == sto02_location["id"]

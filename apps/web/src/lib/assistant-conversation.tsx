@@ -1059,8 +1059,10 @@ export function useAssistantConversation(scope: string) {
       freshTopic = false,
       appliedProposalId?: string,
     ) => {
+      // A request that starts a new topic drops the earlier turns, not the page: the
+      // bar shows the page as "This item", and its × is the way to leave it out.
       store.ask(
-        scope, selection, value, regenerate, session, freshTopic ? [] : references, freshTopic,
+        scope, selection, value, regenerate, session, references, freshTopic,
         appliedProposalId,
       );
     },

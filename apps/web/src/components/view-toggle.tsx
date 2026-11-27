@@ -49,7 +49,7 @@ export function ViewToggle({
     <button
       type="button"
       className={cn(
-        "flex size-11 items-center justify-center rounded-md transition-colors sm:size-7",
+        "flex size-11 items-center justify-center rounded-md transition-colors sm:size-7 coarse:!size-11",
         view === value
           ? "bg-secondary text-foreground"
           : "text-muted-foreground hover:text-foreground",

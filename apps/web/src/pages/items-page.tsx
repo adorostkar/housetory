@@ -635,7 +635,7 @@ export function ItemsPage() {
                 <button
                   type="button"
                   onClick={chip.remove}
-                  className="flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7 coarse:!size-11"
                   aria-label={`Remove ${chip.label}`}
                 >
                   <X className="size-3" />
@@ -645,7 +645,7 @@ export function ItemsPage() {
             <button
               type="button"
               onClick={clearFilters}
-              className="ml-1 min-h-11 text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:min-h-0"
+              className="ml-1 min-h-11 text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:min-h-0 coarse:!min-h-11"
             >
               Reset all filters
             </button>
@@ -780,7 +780,7 @@ function ListNotices({ className }: { className?: string }) {
   const expiring = overview.data?.warranties?.expiring_count ?? 0;
   if (findings + pastDue + expiring === 0) return null;
   const notice =
-    "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:min-h-9";
+    "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:min-h-9 coarse:!min-h-11";
   return (
     <ul
       aria-label="Things to look at"

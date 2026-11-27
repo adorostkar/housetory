@@ -1,6 +1,7 @@
+import json
 import uuid
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -145,7 +146,8 @@ class ExtractionApplySummary(BaseModel):
 class ExtractionLineState(BaseModel):
     """What happened to one extracted line. A line without a state is still pending."""
 
-    status: Literal["applied", "skipped"]
+    # "pending" is a restored line: it waits again, and its saved draft is still here.
+    status: Literal["applied", "skipped", "pending"]
     action: Literal["create", "update", "link"] | None = None
     item: ItemReference | None = None
     at: datetime | None = None
@@ -153,6 +155,8 @@ class ExtractionLineState(BaseModel):
     description: str | None = None
     quantity: int | None = None
     line_total_cents: int | None = None
+    # The complete row draft as the review saved it with the skip.
+    draft: dict[str, Any] | None = None
 
 
 class ExtractionLineStatesOut(BaseModel):
@@ -164,6 +168,17 @@ class ExtractionLineSkipRequest(BaseModel):
     description: str | None = Field(default=None, max_length=300)
     quantity: int | None = Field(default=None, ge=1, le=1_000_000)
     line_total_cents: int | None = Field(default=None, ge=0, le=10**12)
+    # Everything the person edited on the row: names, amounts, the chosen action and
+    # its target, the new item, the updates, the warranty. It is stored as it is sent
+    # and given back unchanged; nothing in it is applied by the server.
+    draft: dict[str, Any] | None = None
+
+    @field_validator("draft")
+    @classmethod
+    def _bounded_draft(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is not None and len(json.dumps(value)) > 20_000:
+            raise ValueError("The row draft is too large to keep.")
+        return value
 
 
 class ExtractionReviewOut(BaseModel):

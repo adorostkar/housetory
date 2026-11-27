@@ -272,7 +272,7 @@ export function LabelsPage() {
         </div>
       )}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">
           <section className="surface p-5 sm:p-6">
             <div className="flex items-center gap-2">
@@ -408,7 +408,7 @@ export function LabelsPage() {
                       type="button"
                       onClick={() => setStartSlot(index)}
                       className={cn(
-                        "flex h-9 items-center justify-center rounded border text-2xs tabular-nums",
+                        "flex h-9 items-center justify-center rounded border text-2xs tabular-nums coarse:h-11",
                         index === startSlot
                           ? "border-primary bg-primary text-primary-foreground"
                           : used
@@ -604,7 +604,7 @@ export function LabelsPage() {
                       offsetX: Number(event.target.value) || 0,
                     }))
                   }
-                  className="mt-1 h-11 text-2xs lg:h-8"
+                  className="mt-1 h-11 text-2xs lg:h-8 coarse:!h-11"
                 />
               </div>
               <div>
@@ -624,7 +624,7 @@ export function LabelsPage() {
                       offsetY: Number(event.target.value) || 0,
                     }))
                   }
-                  className="mt-1 h-11 text-2xs lg:h-8"
+                  className="mt-1 h-11 text-2xs lg:h-8 coarse:!h-11"
                 />
               </div>
             </div>
@@ -632,7 +632,7 @@ export function LabelsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-11 lg:h-8"
+                className="h-11 lg:h-8 coarse:!h-11"
                 disabled={calibrationDownload.isPending}
                 onClick={() => calibrationDownload.mutate()}
               >
@@ -642,7 +642,7 @@ export function LabelsPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-11 lg:h-8"
+                className="h-11 lg:h-8 coarse:!h-11"
                 onClick={() => setCalibration({ offsetX: 0, offsetY: 0 })}
               >
                 Reset offsets

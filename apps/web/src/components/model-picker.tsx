@@ -213,10 +213,10 @@ export function ModelPicker({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          "h-10 w-full min-w-0 rounded-xl border border-input/90 bg-card/65 pl-8 pr-14 text-xs text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50",
+          "h-10 w-full min-w-0 rounded-xl border border-input/90 bg-card/65 pl-8 pr-14 text-xs coarse:h-11 coarse:pr-[4.5rem] text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
-      <div className="absolute right-1.5 top-[1.15rem] flex -translate-y-1/2 items-center gap-0.5">
+      <div className="absolute right-1.5 top-[1.15rem] flex -translate-y-1/2 items-center gap-0.5 coarse:top-[1.375rem]">
         {value ? (
           <button
             type="button"
@@ -225,7 +225,7 @@ export function ModelPicker({
               setOpen(false);
               setSearch("");
             }}
-            className="flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground coarse:size-11"
             aria-label={`Clear ${ariaLabel}`}
           >
             <X className="size-3.5" />

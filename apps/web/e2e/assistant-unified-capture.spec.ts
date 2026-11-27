@@ -1078,7 +1078,7 @@ test("attached invoice flows through extraction, notification, and explicit appr
   await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toContainText("4");
   await panel.getByRole("button", { name: "Review extraction" }).click();
   // Lines are closed rows and nothing is selected to begin with.
-  await expect(panel.getByRole("textbox", { name: /^Name of line/ }).first()).toHaveValue("Cordless drill");
+  await expect(panel.getByRole("button", { name: /^Edit name of line/ }).first()).toHaveText("Cordless drill");
   expect(applyRequests).toBe(0);
   await panel.getByRole("button", { name: "Select all" }).click();
   await panel.getByRole("button", { name: /^Apply: / }).click();
@@ -1208,7 +1208,7 @@ test("an item capture prepared by the assistant is reviewed and explicitly appli
   const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
   await expect(composer).toBeVisible();
   await panel.getByRole("button", { name: "Review items" }).click();
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   const itemName = panel.getByLabel("Item name");
   await expect(itemName).toHaveValue("Ethernet cables");
   await expect(panel.getByLabel("Quantity", { exact: true })).toHaveValue("3");
@@ -1264,7 +1264,7 @@ test("interrupted primary capture polling reaches local review and retry", async
   await expect(page.getByText("Local results are ready to review. Optional AI never applies inventory changes.")).toBeVisible({
     timeout: 10_000,
   });
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   const itemName = page.getByLabel("Item name");
   await expect(itemName).toHaveValue("Ethernet cables");
   await itemName.fill("User-edited Ethernet cables");
@@ -1438,7 +1438,7 @@ test("item review edits survive closing the panel and switching views", async ({
   const panel = page.getByTestId("assistant-panel");
   const itemName = panel.getByLabel("Item name");
   await panel.getByRole("button", { name: "Review items" }).click();
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(itemName).toHaveValue("Ethernet cables");
   await itemName.fill("Blue Ethernet cable");
   await panel.getByRole("checkbox", { name: "Select Blue Ethernet cable" }).uncheck();
@@ -1450,7 +1450,7 @@ test("item review edits survive closing the panel and switching views", async ({
     window.history.pushState({}, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, `/imports/${importBatch.id}`);
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   const fullPageReview = page.getByLabel("Item name");
   await expect(fullPageReview).toHaveValue("Blue Ethernet cable");
   await expect(
@@ -1521,7 +1521,7 @@ test("parked attachment survives a fresh header question without uploading or co
   await headerSearch.fill("Add one Validation Monitor to Storage");
   await headerSearch.press("Enter");
   await panel.getByRole("button", { name: "Review items" }).click();
-  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(panel.getByLabel("Item name")).toHaveValue("Validation Monitor");
   await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
@@ -1548,7 +1548,7 @@ test("multiple captures restore after reload and an older notification opens its
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
     await page.locator("[data-sonner-toast][data-front='true']").hover();
     await page.locator("[data-sonner-toast]").filter({ hasText: "Alpha ready for review" }).getByRole("button", { name: "Review", exact: true }).click();
-    await panel.getByRole("button", { name: "Edit" }).click();
+    await panel.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(panel.getByLabel("Item name")).toHaveValue("Alpha cable");
     await panel.getByLabel("Item name").fill("Reviewed Alpha cable");
     await panel.getByRole("button", { name: "Close assistant" }).click();
@@ -1562,7 +1562,7 @@ test("multiple captures restore after reload and an older notification opens its
     await page.reload();
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
     await openWaitingCapture(page, "Alpha");
-    await panel.getByRole("button", { name: "Edit" }).click();
+    await panel.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(panel.getByLabel("Item name")).toHaveValue("Alpha cable");
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
     await panel.getByRole("checkbox", { name: "Select Alpha cable" }).check();
@@ -1574,7 +1574,7 @@ test("multiple captures restore after reload and an older notification opens its
     await expect(waiting.getByRole("button", { name: "Review Beta", exact: true })).toBeVisible();
     await expect(waiting.getByRole("button", { name: "Review Alpha", exact: true })).toHaveCount(0);
     await waiting.getByRole("button", { name: "Review Beta", exact: true }).click();
-    await panel.getByRole("button", { name: "Edit" }).click();
+    await panel.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(panel.getByRole("textbox", { name: "Item name", exact: true })).toHaveValue("Beta adapter");
     expect(errors).toEqual([]);
   });

@@ -587,7 +587,7 @@ export function ContainerDetailPage() {
             )}
             <Link
               to={`/rooms/${detail.room_id}`}
-              className="font-medium text-foreground/80 underline-offset-4 hover:underline"
+              className="font-medium text-foreground/80 underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
             >
               {roomLabel}
             </Link>

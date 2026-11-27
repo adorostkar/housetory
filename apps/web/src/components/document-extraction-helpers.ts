@@ -282,7 +282,10 @@ export function countExtractedDetails(review: ExtractionReview): number {
 
 /** What the server remembers about one line. A line without a state is still pending. */
 export interface ExtractionLineState {
-  status: "applied" | "skipped";
+  /** "pending" is a restored line: it waits again and still has its saved draft. */
+  status: "applied" | "skipped" | "pending";
+  /** The complete row draft that was saved with the skip. */
+  draft?: Record<string, unknown> | null;
   action?: "create" | "update" | "link" | null;
   item?: { id: string; name: string } | null;
   at?: string | null;
@@ -319,4 +322,58 @@ export function lineDraftErrors(draft: LineDraft): string[] {
     errors.push("Added quantity must be a whole number of at least 1.");
   }
   return errors;
+}
+
+/**
+ * The complete draft of a row, as it is kept with a skip: amounts, the chosen action
+ * and its target, the new item, the updates, the stock choice and the warranty. The
+ * chosen item goes with it, so that the target can be shown again after a reload.
+ */
+export function serializeLineDraft(draft: LineDraft, candidate?: CandidateItem): Record<string, unknown> {
+  return {
+    description: draft.description,
+    quantity: draft.quantity,
+    unitPrice: draft.unitPrice,
+    lineTotal: draft.lineTotal,
+    action: draft.action,
+    itemId: draft.itemId,
+    addQuantity: draft.addQuantity,
+    newItem: draft.newItem,
+    updates: draft.updates,
+    warranty: draft.warranty,
+    ...(candidate ? { candidate } : {}),
+  };
+}
+
+/** Puts a kept draft back on a freshly built row. Unknown or broken parts are ignored. */
+export function restoreLineDraft(base: LineDraft, state: ExtractionLineState | undefined): LineDraft {
+  if (!state || state.status === "applied") return base;
+  const saved = (state.draft ?? {}) as Partial<LineDraft>;
+  const text = (value: unknown, fallback: string) => (typeof value === "string" ? value : fallback);
+  const part = <T extends object>(value: unknown, fallback: T): T =>
+    value && typeof value === "object" ? { ...fallback, ...(value as Partial<T>) } : fallback;
+  const description = text(saved.description, state.description ?? base.description);
+  return {
+    ...base,
+    description,
+    quantity: text(saved.quantity, state.quantity != null ? String(state.quantity) : base.quantity),
+    lineTotal: text(
+      saved.lineTotal,
+      state.line_total_cents != null ? centsInput(state.line_total_cents) : base.lineTotal,
+    ),
+    action: saved.action === "create" || saved.action === "update" || saved.action === "link"
+      ? saved.action : base.action,
+    itemId: text(saved.itemId, base.itemId),
+    addQuantity: typeof saved.addQuantity === "boolean" ? saved.addQuantity : base.addQuantity,
+    newItem: part(saved.newItem, { ...base.newItem, name: state.draft ? base.newItem.name : description }),
+    updates: part(saved.updates, base.updates),
+    warranty: part(saved.warranty, base.warranty),
+  };
+}
+
+/** The item a kept draft points to, when it was saved with the draft. */
+export function savedCandidate(state: ExtractionLineState | undefined): CandidateItem | null {
+  const candidate = state?.draft?.candidate as CandidateItem | undefined;
+  return candidate && typeof candidate === "object" && typeof candidate.id === "string"
+    ? candidate : null;
 }

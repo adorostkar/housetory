@@ -188,7 +188,7 @@ Visa 112.85
   const drillLine = page.getByRole("article", { name: `Cordless Drill ${suffix}` });
   await expect(drillLine.getByRole("checkbox")).not.toBeChecked();
   await expect(drillLine.getByRole("button", { name: "Link to item" })).toBeVisible();
-  await drillLine.getByRole("button", { name: "Edit" }).click();
+  await drillLine.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(drillLine.getByText("Identifier verified")).toBeVisible();
   await expect(drillLine.getByText(/serial number matches/)).toBeVisible();
 
@@ -196,7 +196,7 @@ Visa 112.85
   const bitLine = page.getByRole("article", { name: `Drill Bit Set ${suffix}` });
   // A line without a match proposes a new item. Its room is chosen in the editor.
   await expect(bitLine.getByRole("button", { name: "Add item" })).toBeVisible();
-  await bitLine.getByRole("button", { name: "Edit" }).click();
+  await bitLine.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(bitLine.getByText("No likely household match")).toBeVisible();
   await bitLine.getByLabel("Destination room").selectOption(room.id);
   await bitLine.getByLabel("Optional container").selectOption(box.id);

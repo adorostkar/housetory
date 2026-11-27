@@ -386,6 +386,30 @@ export function InventoryReview({
     },
   });
 
+  // An edit that was started under "Edit first" but not applied. It is kept when the
+  // dialog closes, goes to the server with Skip, and comes back with Restore.
+  const [editDrafts, setEditDrafts] = React.useState<Record<string, { name?: string; categoryId?: string }>>({});
+  const proposedEdit = (suggestion: ReviewSuggestion) => ({
+    name: stringField(suggestion.after, "name") ?? "",
+    categoryId: suggestion.category_id ?? stringField(suggestion.after, "category_id") ?? "",
+  });
+  const editDraftFor = (suggestion: ReviewSuggestion): { name?: string; categoryId?: string } | null => {
+    if (suggestion.id in editDrafts) return editDrafts[suggestion.id] ?? null;
+    const kept = (suggestion.evidence ?? {}).review_draft as
+      { name?: string; category_id?: string } | undefined;
+    if (!kept || typeof kept !== "object") return null;
+    return {
+      ...(kept.name ? { name: kept.name } : {}),
+      ...(kept.category_id ? { categoryId: kept.category_id } : {}),
+    };
+  };
+  // No draft at all sends nothing and leaves a kept edit alone. An empty draft
+  // is sent as such: it tells the server to forget the edit it kept.
+  const dismissBody = (draft: { name?: string; categoryId?: string } | null) =>
+    draft
+      ? { draft: { ...(draft.name ? { name: draft.name } : {}), ...(draft.categoryId ? { category_id: draft.categoryId } : {}) } }
+      : {};
+
   const applyMutation = useMutation({
     mutationFn: ({
       suggestion,
@@ -403,10 +427,18 @@ export function InventoryReview({
           ...(categoryId ? { category_id: categoryId } : {}),
         },
       ),
-    onSuccess: (result) => {
+    onSuccess: (result, { suggestion }) => {
       invalidateInventory();
       refreshReview();
       setEditTarget(null);
+      if (result.status === "applied") {
+        // The edit is applied now; it is no longer a draft.
+        setEditDrafts((current) => {
+          const next = { ...current };
+          delete next[suggestion.id];
+          return next;
+        });
+      }
       if (result.status === "applied") toast.success(result.message);
       else toast.error(result.message);
     },
@@ -417,7 +449,7 @@ export function InventoryReview({
     mutationFn: (suggestion: ReviewSuggestion) =>
       api.post<ReviewDecision>(
         `/inventory-review/suggestions/${suggestion.id}/dismiss`,
-        {},
+        dismissBody(editDraftFor(suggestion)),
       ),
     onSuccess: (result, suggestion) => {
       refreshReview();
@@ -557,11 +589,28 @@ export function InventoryReview({
   };
 
   const openEdit = (suggestion: ReviewSuggestion) => {
+    const draft = editDraftFor(suggestion);
+    const proposed = proposedEdit(suggestion);
     setEditTarget(suggestion);
-    setEditName(stringField(suggestion.after, "name") ?? "");
-    setEditCategoryId(
-      suggestion.category_id ?? stringField(suggestion.after, "category_id") ?? "",
-    );
+    setEditName(draft?.name ?? proposed.name);
+    setEditCategoryId(draft?.categoryId ?? proposed.categoryId);
+  };
+  const closeEdit = () => {
+    if (editTarget) {
+      const proposed = proposedEdit(editTarget);
+      const name = editName.trim();
+      const changed = editTarget.type === "category"
+        ? (editCategoryId && editCategoryId !== proposed.categoryId ? { categoryId: editCategoryId } : null)
+        : (name && name !== proposed.name ? { name } : null);
+      setEditDrafts((current) => {
+        const next = { ...current };
+        // An empty entry says "no edit". Without it, an edit kept by the server
+        // from an earlier Skip would come back.
+        next[editTarget.id] = changed ?? {};
+        return next;
+      });
+    }
+    setEditTarget(null);
   };
 
   const scopeOptions = () => {
@@ -986,7 +1035,7 @@ export function InventoryReview({
           className="group surface mb-5 p-4 sm:p-5"
           data-testid="review-schedule-advanced"
         >
-          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11">
             <span className="flex items-center gap-2">
               Advanced · Scheduled review
               <Badge variant="outline">Off by default</Badge>
@@ -1188,6 +1237,13 @@ export function InventoryReview({
                 const assignedRoom = stringField(evidence, "assigned_room");
                 const beforeCategory = stringField(suggestion.before, "category_name");
                 // An existing record shows what it has now and what it would get.
+                const editable = suggestion.status === "pending" && (
+                  suggestion.action_kind === "apply_category" || suggestion.action_kind === "apply_name"
+                );
+                const editDraft = editable || suggestion.status === "dismissed"
+                  ? editDraftFor(suggestion) : null;
+                const editedValue = editDraft?.name
+                  ?? categories.find((category) => category.id === editDraft?.categoryId)?.name;
                 const values: ReviewValue[] = [
                   ...(suggestion.type === "name" && categoryName
                     ? [{ label: "Name", before: beforeName ?? undefined, value: categoryName }]
@@ -1199,6 +1255,8 @@ export function InventoryReview({
                         value: `${categoryName}${suggestion.after.category_is_new === true ? " (new)" : ""}`,
                       }]
                     : []),
+                  // What the person entered instead of the proposal. The row applies this.
+                  ...(editedValue ? [{ label: "Your edit", value: editedValue }] : []),
                   ...(proposedTags.length > 0 ? [{ label: "Tags", value: proposedTags.join(", ") }] : []),
                   ...(missingFields.length > 0
                     ? [{ label: "Missing", value: missingFields.join(", ") }]
@@ -1218,9 +1276,6 @@ export function InventoryReview({
                   suggestion.action_kind === "apply_category" ||
                   suggestion.action_kind === "apply_name" ||
                   suggestion.action_kind === "apply_organisation"
-                );
-                const editable = suggestion.status === "pending" && (
-                  suggestion.action_kind === "apply_category" || suggestion.action_kind === "apply_name"
                 );
                 return (
                   <li key={suggestion.id}>
@@ -1271,7 +1326,8 @@ export function InventoryReview({
                       }
                       primary={applies ? {
                         label: suggestion.action_kind === "apply_organisation" ? "Apply changes" : "Apply change",
-                        onClick: () => applyMutation.mutate({ suggestion }),
+                        // With an edit of your own, the row applies that edit.
+                        onClick: () => applyMutation.mutate({ suggestion, ...(editable ? editDraft ?? {} : {}) }),
                         disabled: !canWrite || applyMutation.isPending,
                       } : undefined}
                       onSkip={canWrite && (suggestion.status === "pending" || suggestion.status === "stale")
@@ -1378,7 +1434,7 @@ export function InventoryReview({
       <Dialog
         open={Boolean(editTarget)}
         onOpenChange={(open) => {
-          if (!open) setEditTarget(null);
+          if (!open) closeEdit();
         }}
       >
         <DialogContent>
@@ -1386,6 +1442,7 @@ export function InventoryReview({
             <DialogTitle>Edit before accepting</DialogTitle>
             <DialogDescription>
               The server rechecks the item version and proposed values before applying.
+              Closing keeps what you entered with this suggestion.
             </DialogDescription>
           </DialogHeader>
           {editTarget?.type === "category" ? (
@@ -1416,8 +1473,8 @@ export function InventoryReview({
             </label>
           )}
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setEditTarget(null)}>
-              Cancel
+            <Button type="button" variant="ghost" onClick={closeEdit}>
+              Keep for later
             </Button>
             <Button
               type="button"

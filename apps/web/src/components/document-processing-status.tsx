@@ -164,7 +164,8 @@ export function DocumentProcessingStatus({
       {action.error && <FormError message={getApiErrorMessage(action.error)} />}
       <div className="flex flex-wrap gap-2">
         {snapshot.local_available && !manual && (
-          <Button size="sm" variant="outline" onClick={onManualReview}>Use local/manual review now</Button>
+          <Button size="sm" variant="outline" onClick={onManualReview}
+            className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 coarse:h-auto coarse:min-h-11">Use local/manual review now</Button>
         )}
         {canWrite && snapshot.can_cancel && (
           <Button size="sm" variant="outline" disabled={action.isPending}

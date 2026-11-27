@@ -394,12 +394,12 @@ export function LoansPage() {
               )}
             >
               {filterChips.map((chip) => (
-                <Badge key={chip.key} variant="secondary" className="gap-1 py-0 pl-2.5 pr-0 text-2xs">
-                  <span className="max-w-56 truncate">{chip.label}</span>
+                <Badge key={chip.key} variant="secondary" className="max-w-full gap-1 py-0 pl-2.5 pr-0 text-2xs">
+                  <span className="min-w-0 max-w-56 truncate">{chip.label}</span>
                   <button
                     type="button"
                     onClick={chip.remove}
-                    className="flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7 coarse:!size-11"
                     aria-label={`Remove ${chip.label}`}
                   >
                     <X className="size-3" />

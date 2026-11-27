@@ -33,6 +33,36 @@ from ..containers import create_containers
 from ..items import create_item_record, get_item, update_item_record
 from .serialization import _batch_detail, _safe_error, serialize_batch
 
+# The choices of a row that are not part of the proposal itself: what to do with it and
+# with which target. They are kept with a skipped row, inside its proposal, so that the
+# whole draft comes back after a reload and after Restore.
+REVIEW_DRAFT_KEY = "review_draft"
+
+
+def _proposed_json(proposed: ProposedItem, request: ImportApplyEntry | None = None) -> dict:
+    """The edited proposal as stored. With ``request`` it also carries the review draft."""
+    data = proposed.model_dump(mode="json")
+    relationships = dict(data.get("relationships") or {})
+    relationships.pop(REVIEW_DRAFT_KEY, None)
+    if request is not None:
+        draft: dict[str, Any] = {
+            "action": "merge" if request.merge_item_id else "import",
+            "merge_item_id": str(request.merge_item_id) if request.merge_item_id else None,
+            "merge_fields": list(request.merge_fields),
+            "allow_duplicate": request.allow_duplicate,
+        }
+        if request.entity_type is not None:
+            draft["entity_type"] = request.entity_type
+        if "parent_entry_id" in request.model_fields_set:
+            draft["parent_entry_id"] = (
+                str(request.parent_entry_id) if request.parent_entry_id else None
+            )
+        if "legacy_identifier" in request.model_fields_set:
+            draft["legacy_identifier"] = request.legacy_identifier
+        relationships[REVIEW_DRAFT_KEY] = draft
+    data["relationships"] = relationships
+    return data
+
 
 def _context_property(db: Session, batch: ImportBatch) -> Property:
     raw = (batch.metadata_json or {}).get("context") or {}
@@ -443,18 +473,21 @@ def apply_hierarchy_import(
             continue
         savepoint = db.begin_nested()
         try:
+            proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
             if request.action == "reject":
+                entry.proposed = _proposed_json(proposed, request)
                 entry.status = ImportEntryStatus.REJECTED.value
                 rejected += 1
                 savepoint.commit()
                 continue
             if request.action == "skip":
+                # The edited record and its choices are kept, for Restore.
+                entry.proposed = _proposed_json(proposed, request)
                 entry.status = ImportEntryStatus.SKIPPED.value
                 skipped += 1
                 savepoint.commit()
                 continue
-            proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
-            entry.proposed = proposed.model_dump(mode="json")
+            entry.proposed = _proposed_json(proposed)
             entity_type = request.entity_type or entry.entity_type
             if entity_type not in {value.value for value in ImportEntityType}:
                 raise ValueError("Choose a valid entity type.")
@@ -689,14 +722,17 @@ def apply_import(
         proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
         savepoint = db.begin_nested()
         try:
-            entry.proposed = proposed.model_dump(mode="json")
+            entry.proposed = _proposed_json(proposed)
             entry.field_sources = proposed.field_sources
             if request.action == "reject":
+                entry.proposed = _proposed_json(proposed, request)
                 entry.status = ImportEntryStatus.REJECTED.value
                 rejected += 1
                 savepoint.commit()
                 continue
             if request.action == "skip":
+                # The edited row and its choices (action, target) are kept, for Restore.
+                entry.proposed = _proposed_json(proposed, request)
                 entry.status = ImportEntryStatus.SKIPPED.value
                 entry.duplicate_resolution = "skip"
                 skipped += 1
@@ -780,7 +816,8 @@ def restore_import_entry(db: Session, batch: ImportBatch, entry_id: uuid.UUID) -
     """Put a skipped or rejected entry back into the review, with its saved edits.
 
     Skip and Reject are remembered so that a row does not come back by itself. This is
-    the explicit way back. An imported or merged entry is never reopened.
+    the explicit way back. An imported or merged entry is never reopened. The proposal,
+    with the review draft inside it, is left exactly as it was saved with the skip.
     """
     entry = db.scalar(
         select(ImportEntry)

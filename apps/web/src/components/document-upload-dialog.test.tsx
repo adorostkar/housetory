@@ -257,4 +257,103 @@ describe("DocumentUploadDialog", () => {
     expect(screen.getByText(/Attached to:/)).toHaveTextContent("Cordless drill");
     expect(screen.getByRole("button", { name: /Attach to more items/ })).toHaveAttribute("aria-expanded", "false");
   });
+  // After the file is saved, typed details and chosen items are a draft. A failed
+  // save must never lose it.
+  async function saveFileAndTypeDetails() {
+    await userEvent.upload(screen.getByLabelText("File"),
+      new File(["receipt"], "receipt.txt", { type: "text/plain" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Add details/ }));
+    await userEvent.type(screen.getByLabelText(/^Merchant/), "Clas Ohlson");
+    await userEvent.type(screen.getByLabelText(/^Notes/), "Return within 30 days");
+    await userEvent.selectOptions(screen.getByLabelText("Type"), "receipt");
+  }
+  const expectDraftKept = () => {
+    expect(screen.getByLabelText(/^Merchant/)).toHaveValue("Clas Ohlson");
+    expect(screen.getByLabelText(/^Notes/)).toHaveValue("Return within 30 days");
+    expect(screen.getByLabelText("Type")).toHaveValue("receipt");
+  };
+
+  it("keeps the draft and offers Retry when Done cannot save; Retry saves and closes", async () => {
+    const { onOpenChange, onUploaded } = renderDialog();
+    await saveFileAndTypeDetails();
+    vi.mocked(api.patch).mockRejectedValueOnce(new Error("The library is not reachable."));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your changes are not saved yet. The library is not reachable.",
+    );
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(onUploaded).not.toHaveBeenCalled();
+    expectDraftKept();
+    expect(screen.getByText(/the document itself stays in the library/)).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.patch).toHaveBeenCalledTimes(2);
+    expect(api.patch).toHaveBeenLastCalledWith("/documents/document-1", expect.objectContaining({
+      merchant: "Clas Ohlson", notes: "Return within 30 days", document_type: "receipt",
+    }));
+    expect(onUploaded).toHaveBeenCalledWith(expect.objectContaining({ merchant: "Clas Ohlson" }));
+  });
+
+  it("Discard changes closes without another save and keeps the saved document", async () => {
+    const { onOpenChange, onUploaded } = renderDialog();
+    await saveFileAndTypeDetails();
+    vi.mocked(api.patch).mockRejectedValue(new Error("The library is not reachable."));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await screen.findByRole("alert");
+    expect(api.patch).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(api.patch).toHaveBeenCalledTimes(1);
+    expect(api.delete).not.toHaveBeenCalled();
+    expect(onUploaded).toHaveBeenCalledWith(uploadedDocument);
+  });
+
+  it("Escape with unsaved edits saves them, and stays open with the draft when that fails", async () => {
+    const { onOpenChange } = renderDialog();
+    await saveFileAndTypeDetails();
+    vi.mocked(api.patch).mockRejectedValueOnce(new Error("Offline"));
+    await userEvent.keyboard("{Escape}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your changes are not saved yet. Offline");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expectDraftKept();
+
+    // A second Escape tries again; this time the save works and the surface closes.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.patch).toHaveBeenLastCalledWith("/documents/document-1",
+      expect.objectContaining({ merchant: "Clas Ohlson" }));
+  });
+
+  it("keeps a chosen item when attaching fails and sends it again with the retry", async () => {
+    renderDialog();
+    await userEvent.upload(screen.getByLabelText("File"),
+      new File(["receipt"], "receipt.txt", { type: "text/plain" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Attach to an item/ }));
+    vi.mocked(api.patch).mockRejectedValueOnce(new Error("Offline"));
+    await userEvent.click(screen.getByRole("button", { name: "Add test item" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Offline");
+    // The choice is still there, not rolled back.
+    expect(screen.getByText("2 selected")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(api.patch).toHaveBeenLastCalledWith(
+      "/documents/document-1", { item_ids: ["item-1", "item-1"] },
+    ));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("keeps the chosen file and offers Retry when the first upload fails", async () => {
+    vi.mocked(api.postForm).mockRejectedValueOnce(new Error("Upload interrupted"));
+    renderDialog();
+    const file = new File(["receipt"], "receipt.txt", { type: "text/plain" });
+    await userEvent.upload(screen.getByLabelText("File"), file);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The file was not saved. Upload interrupted");
+    expect(screen.getByText("receipt.txt")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledTimes(2));
+    expect((vi.mocked(api.postForm).mock.calls[1]![1] as FormData).get("file")).toBe(file);
+    expect(await screen.findByRole("button", { name: "Done" })).toBeVisible();
+  });
 });

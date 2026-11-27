@@ -505,7 +505,7 @@ export function SystemStatusPanel({
             </p>
             <Link
               to="/review"
-              className="mt-1 inline-block text-2xs text-brass underline-offset-2 hover:underline"
+              className="mt-1 inline-block text-2xs text-brass underline-offset-2 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
             >
               Open Review schedule
             </Link>
@@ -675,7 +675,7 @@ export function SystemStatusPanel({
                     {service.settings_path ? (
                       <Link
                         to={service.settings_path}
-                        className="mt-1 inline-block text-2xs text-brass underline-offset-2 hover:underline"
+                        className="mt-1 inline-block text-2xs text-brass underline-offset-2 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
                       >
                         Open settings
                       </Link>

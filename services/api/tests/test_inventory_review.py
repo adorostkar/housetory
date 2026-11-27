@@ -1252,8 +1252,39 @@ def test_offline_review_persists_scoped_suggestions_without_mutating_items(owner
     assert [entry["id"] for entry in suggestions(client)["items"]].count(duplicate["id"]) == 1
     again = client.post(f"/api/v1/inventory-review/suggestions/{duplicate['id']}/dismiss")
     assert again.status_code == 200, again.text
+
+    # A suggestion that was edited but not applied keeps that edit through Skip, a
+    # reload and Restore; the memory of the dismissal is not changed by it.
+    editable = next(
+        entry
+        for entry in suggestions(client)["items"]
+        if entry["action_kind"] in {"apply_name", "apply_category"}
+    )
+    draft = {"name": "Edited before skipping"}
+    skipped = client.post(
+        f"/api/v1/inventory-review/suggestions/{editable['id']}/dismiss", json={"draft": draft}
+    )
+    assert skipped.status_code == 200, skipped.text
+    kept = next(e for e in suggestions(client, "dismissed")["items"] if e["id"] == editable["id"])
+    assert kept["evidence"]["review_draft"] == draft
+    assert run_review(client).json()["created_suggestion_count"] == 0
+    assert client.post(
+        f"/api/v1/inventory-review/suggestions/{editable['id']}/undo"
+    ).json()["suggestion"]["status"] == "pending"
+    back = next(e for e in suggestions(client)["items"] if e["id"] == editable["id"])
+    assert back["evidence"]["review_draft"] == draft
+    assert back["fingerprint"] == editable["fingerprint"]
     assert run_review(client).json()["created_suggestion_count"] == 0
     assert duplicate["id"] not in {entry["id"] for entry in suggestions(client)["items"]}
+
+    # A skip that says nothing about a draft leaves the kept edit alone. A skip with an
+    # empty draft means the edit was taken back: it must not return with Restore.
+    dismiss = f"/api/v1/inventory-review/suggestions/{editable['id']}/dismiss"
+    undo = f"/api/v1/inventory-review/suggestions/{editable['id']}/undo"
+    assert client.post(dismiss).status_code == 200
+    assert client.post(undo).json()["suggestion"]["evidence"]["review_draft"] == draft
+    assert client.post(dismiss, json={"draft": {}}).status_code == 200
+    assert "review_draft" not in client.post(undo).json()["suggestion"]["evidence"]
 
 
 def test_category_and_name_apply_undo_stale_and_bulk(owner_client):

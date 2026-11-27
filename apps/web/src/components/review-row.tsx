@@ -1,6 +1,7 @@
 import { AlertTriangle, ChevronDown } from "lucide-react";
 import * as React from "react";
 
+import { useBarEditor, type BarEditRequest } from "@/components/shell/bar-editor";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -19,15 +20,74 @@ export interface ReviewValue {
   before?: React.ReactNode;
   /** The value was guessed or conflicts with something. It is marked "check". */
   uncertain?: boolean;
+  /**
+   * Makes the value a button that opens it in the bar editor. Where there is no bar
+   * (a page on its own), the value stays as text and is changed in the row's editor.
+   */
+  edit?: ValueEdit;
+}
+
+/** What the bar editor needs to change one value of a row. */
+export type ValueEdit = Pick<BarEditRequest, "value" | "inputMode" | "validate" | "onCommit"> & {
+  /** Short name in front of the field. Defaults to the value's label. */
+  label?: string;
+  /** What is being changed, for screen readers: "Serial number of Cordless drill". */
+  description: string;
+};
+
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** A value that is tapped to change it through the bar. */
+function ValueButton({ edit, label, className, children }: {
+  edit: ValueEdit;
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const barEditor = useBarEditor();
+  const ref = React.useRef<HTMLButtonElement>(null);
+  // The save must go through the row as it is when the value is saved, not as
+  // it was when the value was tapped: another edit may have come in between.
+  const latest = React.useRef(edit);
+  latest.current = edit;
+  if (!barEditor) return <>{children}</>;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={`Edit ${lowerFirst(edit.description)}`}
+      onClick={() => barEditor.edit({
+        label: edit.label ?? label,
+        description: edit.description,
+        value: edit.value,
+        inputMode: edit.inputMode,
+        validate: (value) => latest.current.validate?.(value) ?? null,
+        onCommit: (value) => latest.current.onCommit(value),
+        returnFocus: ref.current,
+      })}
+      className={cn(
+        "inline-flex min-h-11 min-w-11 max-w-full items-center rounded-md text-left underline decoration-dotted underline-offset-4 transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 lg:min-h-7 lg:min-w-0 coarse:!min-h-11 coarse:!min-w-11",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 export function ReviewRow({
+  id,
+  number,
+  marked = false,
+  onActivate,
   title,
   titleLabel,
   onTitleChange,
+  titleValidate,
   titleError,
   quantity,
   onQuantityChange,
+  quantityValidate,
   quantityError,
   thumbnail,
   values = [],
@@ -47,13 +107,24 @@ export function ReviewRow({
   style,
   children,
 }: {
+  /** Id of the row element, so that something else (a pin on a photo) can go to it. */
+  id?: string;
+  /** The number of a finding. It is the same number as its pin on the photo. */
+  number?: number;
+  /** The row is the one that is pointed at, for example by its pin. */
+  marked?: boolean;
+  /** The pointer or the focus came to this row. */
+  onActivate?: () => void;
   title: string;
   /** Accessible name of the name field, for example "Name of Cordless drill". */
   titleLabel?: string;
   onTitleChange?: (value: string) => void;
+  /** Checked before the bar editor saves a name. A text keeps the editor open. */
+  titleValidate?: (value: string) => string | null;
   titleError?: string | null;
   quantity?: number | string | null;
   onQuantityChange?: (value: string) => void;
+  quantityValidate?: (value: string) => string | null;
   quantityError?: string | null;
   thumbnail?: React.ReactNode;
   values?: ReviewValue[];
@@ -84,12 +155,30 @@ export function ReviewRow({
 }) {
   const ids = React.useId();
   const editable = Boolean(onTitleChange) && !disabled;
+  // With a bar on the page, a value is tapped and changed there. Without one (a page
+  // on its own), name and quantity are fields in the row, as before.
+  const barEditor = useBarEditor();
+  const selected = Boolean(selection?.checked);
   const inlineInput =
     "min-h-11 rounded-md border border-transparent bg-transparent px-1.5 text-sm font-medium transition-colors hover:border-border focus-visible:border-input focus-visible:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 lg:min-h-9";
   return (
     <article
       aria-label={title || "Unnamed"}
-      className={cn("surface overflow-hidden", selection?.checked && "border-sage/40", className)}
+      id={id}
+      tabIndex={id ? -1 : undefined}
+      data-selected={selected ? "true" : undefined}
+      data-marked={marked ? "true" : undefined}
+      onMouseEnter={onActivate}
+      onFocusCapture={onActivate}
+      className={cn(
+        "surface overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        // A selected row has its own background and a bar in the primary colour, so
+        // that it does not depend on colour alone. Text on it stays in the foreground
+        // colours, which are readable on this background in every theme.
+        selected && "border-primary bg-accent shadow-[inset_4px_0_0_0_hsl(var(--primary))]",
+        marked && "ring-2 ring-ring/60",
+        className,
+      )}
       style={style}
     >
       <div className="flex items-start gap-2 p-3 sm:gap-3 sm:p-4">
@@ -108,7 +197,31 @@ export function ReviewRow({
         {thumbnail && <div className="shrink-0">{thumbnail}</div>}
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {editable ? (
+            {number != null && (
+              <span
+                aria-label={`Finding ${number}`}
+                className="flex size-6 shrink-0 items-center justify-center rounded-full border border-primary bg-card text-xs font-semibold tabular-nums text-foreground"
+              >
+                {number}
+              </span>
+            )}
+            {editable && barEditor ? (
+              <h3 className="min-w-0 flex-1 basis-16">
+                <ValueButton
+                  label="Name"
+                  className={cn("break-words text-sm font-medium", titleError && "decoration-destructive")}
+                  edit={{
+                    description: titleLabel ?? "Name",
+                    value: title,
+                    inputMode: "text",
+                    validate: titleValidate,
+                    onCommit: (value) => onTitleChange?.(value),
+                  }}
+                >
+                  {title || <span className="text-muted-foreground">No name</span>}
+                </ValueButton>
+              </h3>
+            ) : editable ? (
               <input
                 id={`${ids}-title`}
                 value={title}
@@ -122,7 +235,22 @@ export function ReviewRow({
             ) : (
               <h3 className="min-w-0 break-words text-sm font-medium">{title}</h3>
             )}
-            {onQuantityChange && !disabled ? (
+            {onQuantityChange && !disabled && barEditor ? (
+              <ValueButton
+                label="Quantity"
+                className="ml-auto shrink-0 justify-end text-sm tabular-nums"
+                edit={{
+                  description: `Quantity of ${title || "this row"}`,
+                  value: quantity == null ? "" : String(quantity),
+                  inputMode: "numeric",
+                  validate: quantityValidate,
+                  onCommit: (value) => onQuantityChange(value),
+                }}
+              >
+                <span aria-hidden="true" className="text-muted-foreground">×</span>
+                {quantity == null || quantity === "" ? "?" : quantity}
+              </ValueButton>
+            ) : onQuantityChange && !disabled ? (
               <label className="inline-flex shrink-0 items-center gap-1 text-sm text-muted-foreground">
                 <span aria-hidden="true">×</span>
                 <input
@@ -142,15 +270,23 @@ export function ReviewRow({
             ) : null}
             {badges}
           </div>
+          {/* Warnings and errors are written in the text colour; the icon carries the
+              warning colour. So they stay readable on the selected background too. */}
           {titleError && (
-            <p id={`${ids}-title-error`} role="alert" className="text-xs text-destructive">{titleError}</p>
+            <p id={`${ids}-title-error`} role="alert" className="flex items-start gap-1.5 text-xs font-medium text-foreground">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              <span className="min-w-0 break-words">{titleError}</span>
+            </p>
           )}
           {quantityError && (
-            <p id={`${ids}-quantity-error`} role="alert" className="text-xs text-destructive">{quantityError}</p>
+            <p id={`${ids}-quantity-error`} role="alert" className="flex items-start gap-1.5 text-xs font-medium text-foreground">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              <span className="min-w-0 break-words">{quantityError}</span>
+            </p>
           )}
           {checks.length > 0 && (
-            <p className="flex items-start gap-1.5 text-xs text-brass">
-              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+            <p className="flex items-start gap-1.5 text-xs text-foreground">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-brass" />
               <span className="min-w-0 break-words">Check: {checks.join(" · ")}</span>
             </p>
           )}
@@ -169,19 +305,21 @@ export function ReviewRow({
                   <span
                     className={cn(
                       "font-medium text-foreground",
-                      entry.uncertain && "rounded bg-brass-soft/60 px-1 text-brass",
+                      entry.uncertain && "rounded bg-brass-soft/60 px-1",
                     )}
                   >
-                    {entry.value}
+                    {entry.edit && !disabled ? (
+                      <ValueButton label={entry.label} edit={entry.edit}>{entry.value}</ValueButton>
+                    ) : entry.value}
                   </span>
-                  {entry.uncertain && <span className="ml-1 text-brass">· check</span>}
+                  {entry.uncertain && <span className="ml-1 font-medium text-foreground">· check</span>}
                 </li>
               ))}
             </ul>
           )}
           {error && (
-            <p role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
-              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+            <p role="alert" className="flex items-start gap-1.5 text-xs font-medium text-foreground">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-destructive" />
               <span className="min-w-0 break-words">{error}</span>
             </p>
           )}
@@ -218,7 +356,8 @@ export function ReviewRow({
         </div>
       </div>
       {expand?.open && children && (
-        <div id={`${ids}-more`} className="space-y-5 border-t border-border/60 p-3 sm:p-4">
+        // The editor keeps the normal surface colour, also when the row is selected.
+        <div id={`${ids}-more`} className="space-y-5 border-t border-border/60 bg-card p-3 sm:p-4">
           {children}
         </div>
       )}

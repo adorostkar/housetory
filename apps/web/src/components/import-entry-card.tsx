@@ -125,6 +125,10 @@ export function ImportEntryCard({
   onAdd,
   onSkip,
   onReject,
+  rowId,
+  number,
+  marked,
+  onActivate,
 }: {
   entry: ImportEntry;
   proposed: ProposedItem;
@@ -151,6 +155,11 @@ export function ImportEntryCard({
   /** Skip removes the row from the list. Its edits are kept and it can be restored. */
   onSkip?: () => void;
   onReject?: () => void;
+  /** For a photo finding: the row's id, its number and its link with the pin. */
+  rowId?: string;
+  number?: number;
+  marked?: boolean;
+  onActivate?: () => void;
 }) {
   const defaultCurrency = useDefaultCurrency();
   // Rows start closed. Only a field that must be corrected opens the editor by itself.
@@ -335,12 +344,42 @@ export function ImportEntryCard({
             }]
           : []),
         ...(proposed.serial_number
-          ? [{ label: "Serial", value: proposed.serial_number, uncertain: inferred("serial_number") }]
+          ? [{
+              label: "Serial",
+              value: proposed.serial_number,
+              uncertain: inferred("serial_number"),
+              // The same update as the Serial number field of the editor.
+              edit: {
+                label: "Serial",
+                description: `Serial number of ${proposed.name || "this item"}`,
+                value: proposed.serial_number,
+                onCommit: (value: string) => update({ serial_number: value || null }),
+              },
+            }]
           : []),
         ...(proposed.purchase?.price_cents != null
           ? [{
               label: "Price",
               value: formatCurrency(proposed.purchase.price_cents, proposed.purchase.currency ?? defaultCurrency),
+              // The same update as the Price field of the editor.
+              edit: {
+                description: `Price of ${proposed.name || "this item"}`,
+                value: (proposed.purchase.price_cents / 100).toFixed(2),
+                inputMode: "decimal" as const,
+                validate: (value: string) =>
+                  value === "" || /^\d+(\.\d{1,2})?$/.test(value)
+                    ? null : "Enter an amount such as 129.90, or leave it empty.",
+                onCommit: (value: string) => update({
+                  purchase: {
+                    merchant: proposed.purchase?.merchant ?? null,
+                    purchase_date: proposed.purchase?.purchase_date ?? null,
+                    price_cents: value ? Math.round(Number(value) * 100) : null,
+                    currency: proposed.purchase?.currency ?? defaultCurrency,
+                    order_number: proposed.purchase?.order_number ?? null,
+                    notes: proposed.purchase?.notes ?? null,
+                  },
+                }),
+              },
             }]
           : []),
       ];
@@ -697,9 +736,18 @@ export function ImportEntryCard({
   const doneItemId = entry.imported_item_id ?? entry.matched_item_id;
   return (
     <ReviewRow
+      id={rowId}
+      number={number}
+      marked={marked}
+      onActivate={onActivate}
       title={proposed.name}
-      titleLabel={`Name of ${entry.proposed.name || "this item"}`}
+      // The label follows a corrected name, so a screen reader hears the current one.
+      titleLabel={`Name of ${proposed.name || entry.proposed.name || "this item"}`}
       onTitleChange={final ? undefined : (name) => update({ name })}
+      // The bar editor checks a value before it saves it, with the same messages.
+      titleValidate={(value) => (value ? null : "Give this item a name.")}
+      quantityValidate={(value) =>
+        /^\d+$/.test(value) && Number(value) <= 1_000_000 ? null : "Enter a whole number, 0 or more."}
       titleError={open ? null : errors?.name}
       quantity={Number.isNaN(proposed.quantity) ? "" : proposed.quantity}
       onQuantityChange={final

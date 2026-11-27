@@ -61,7 +61,7 @@ export function ItemMultiSelect({
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Find an item…"
             aria-label="Find items"
-            className="h-10 w-full rounded-t-xl bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30 disabled:opacity-50"
+            className="h-10 w-full rounded-t-xl bg-transparent pl-9 pr-3 text-xs coarse:h-11 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30 disabled:opacity-50"
           />
         </div>
         <div className="max-h-56 overflow-y-auto p-1.5">

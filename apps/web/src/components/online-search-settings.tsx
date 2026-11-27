@@ -430,7 +430,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
           </div>
 
           <details className="mt-4 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
-            <summary className="cursor-pointer font-medium text-foreground/80">
+            <summary className="cursor-pointer font-medium text-foreground/80 coarse:flex coarse:min-h-11 coarse:items-center">
               Installation fallback and advanced gateway
             </summary>
             <p className="mt-2 [&_code]:break-all">

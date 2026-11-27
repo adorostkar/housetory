@@ -85,7 +85,7 @@ export function RoomCard({
             <Link
               key={child.id}
               to={`/rooms/${child.id}`}
-              className="flex items-center justify-between rounded-lg px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              className="flex items-center justify-between rounded-lg px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground coarse:min-h-11"
               style={{
                 marginLeft: `${depth * 18}px`,
                 paddingLeft: "10px",

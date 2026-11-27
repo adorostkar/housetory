@@ -30,7 +30,8 @@ export function PlacesLayout() {
             end
             className={({ isActive }) =>
               cn(
-                "-mb-px flex min-h-11 shrink-0 items-center border-b-2 px-4 text-sm font-medium transition-colors",
+                // One px of the tab lies under the line below it, so on touch it is 45 px high.
+                "-mb-px flex min-h-11 shrink-0 items-center border-b-2 px-4 text-sm font-medium transition-colors coarse:min-h-[2.8125rem]",
                 isActive
                   ? "border-sage text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",

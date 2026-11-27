@@ -622,7 +622,7 @@ function StocktakeItemCard({
             {row.item_id && !row.deleted ? (
               <Link
                 to={`/items/${row.item_id}`}
-                className="min-w-0 break-words text-sm font-medium leading-snug underline-offset-4 hover:underline"
+                className="min-w-0 break-words text-sm font-medium leading-snug underline-offset-4 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
               >
                 {row.current.name ?? row.item_name}
               </Link>

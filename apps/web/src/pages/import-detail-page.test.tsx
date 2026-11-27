@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api";
 import type { ImportReviewDraft } from "@/lib/assistant-documents";
 import type { ImportBatchDetail, ImportEntry } from "@/lib/types";
+import { BarEditorBoundary } from "@/components/shell/bar-editor";
 import { ImportDetailPage } from "@/pages/import-detail-page";
 
 vi.mock("sonner", () => ({
@@ -54,12 +55,13 @@ function batchOf(entries: ImportEntry[], patch: Partial<ImportBatchDetail> = {})
 
 let server: ImportBatchDetail;
 
-function renderPage() {
+function renderPage({ bar = false }: { bar?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const page = <ImportDetailPage batchId="batch-1" embedded />;
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <ImportDetailPage batchId="batch-1" embedded />
+        {bar ? <BarEditorBoundary>{page}</BarEditorBoundary> : page}
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -98,7 +100,20 @@ beforeEach(() => {
       const request = requested.find((candidate) => candidate.id === item.id);
       if (!request) return item;
       if (item.status === "imported") { skipped += 1; return item; }
-      if (request.action === "skip") { skipped += 1; return { ...item, status: "skipped", proposed: request.proposed }; }
+      if (request.action === "skip") {
+        skipped += 1;
+        // Like the server: the edited proposal is kept, with the choices of the row.
+        const choice = request as { merge_item_id?: string | null; merge_fields?: string[] };
+        return { ...item, status: "skipped", proposed: {
+          ...request.proposed,
+          relationships: { ...request.proposed.relationships, review_draft: {
+            action: choice.merge_item_id ? "merge" : "import",
+            merge_item_id: choice.merge_item_id ?? null,
+            merge_fields: choice.merge_fields ?? [],
+            allow_duplicate: false,
+          } },
+        } };
+      }
       if (request.action === "merge") { merged += 1; return { ...item, status: "merged", matched_item_id: "item-9" }; }
       if (request.proposed.name === "Broken") {
         failed += 1;
@@ -224,4 +239,217 @@ describe("ImportDetailPage review", () => {
     expect((vi.mocked(api.post).mock.calls[1]![1] as { entries: Array<{ id: string }> }).entries.map((item) => item.id))
       .toEqual(["e2"]);
   });
+  it("brings a skipped row back after a reload with its edits and its action and target", async () => {
+    const view = renderPage();
+    await screen.findByRole("article", { name: "Drill" });
+    // Edit the row and choose to update the existing item instead of adding a new one.
+    const name = within(row("Drill")).getByRole("textbox", { name: "Name of Drill" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Drill 18V");
+    await userEvent.click(within(row("Drill 18V")).getByRole("button", { name: "Update this one" }));
+    await userEvent.click(within(row("Drill 18V")).getByRole("checkbox", { name: "Brand" }));
+    await userEvent.click(within(row("Drill 18V")).getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    // The skip carries the whole draft: the edited values and the chosen target.
+    expect(vi.mocked(api.post).mock.calls[0]![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e3", action: "skip", merge_item_id: "item-9", merge_fields: ["serial_number", "brand"],
+      proposed: expect.objectContaining({ name: "Drill 18V", serial_number: "NEW-7" }),
+    })] });
+    await waitFor(() => expect(screen.queryByRole("article", { name: "Drill 18V" })).not.toBeInTheDocument());
+
+    // A reload has only what the server kept.
+    view.unmount();
+    drafts.clear();
+    renderPage();
+    await userEvent.click(await screen.findByText("Skipped (1)"));
+    await userEvent.click(screen.getByRole("button", { name: "Restore Drill 18V" }));
+    const restored = await screen.findByRole("article", { name: "Drill 18V" });
+    expect(within(restored).getByRole("button", { name: "Updating this one" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(restored).getByRole("checkbox", { name: "Brand" })).toBeChecked();
+    expect(within(restored).getByRole("checkbox", { name: "Serial number" })).toBeChecked();
+    expect(within(restored).getByText("Cordless drill", { selector: "span" }).closest("li")).toHaveTextContent("Updates: Cordless drill");
+    expect(within(restored).getByText("NEW-7")).toBeVisible();
+
+    // Applying the restored row does what was chosen before the skip.
+    await userEvent.click(within(restored).getByRole("button", { name: "Apply changes" }));
+    await waitFor(() => expect(vi.mocked(api.post).mock.calls.at(-1)![1]).toEqual({ entries: [
+      expect.objectContaining({
+        id: "e3", action: "merge", merge_item_id: "item-9", merge_fields: ["serial_number", "brand"],
+        proposed: expect.objectContaining({ name: "Drill 18V" }),
+      }),
+    ] }));
+  });
 });
+
+// The bar editor takes the focus and selects the old value one frame after it opens.
+async function barField() {
+  const field = within(await screen.findByTestId("bar-editor")).getByRole("textbox");
+  await waitFor(() => expect(field).toHaveFocus());
+  return field;
+}
+
+describe("ImportDetailPage photo findings", () => {
+  const region = (x: number, y: number) => ({ x, y, width: 0.2, height: 0.3 });
+  const photo = (regions: Array<ImportEntry["source_region"]>) => batchOf(
+    [entry("e1", "Ladder"), entry("e2", "Rope"), entry("e3", "Lamp")]
+      .map((item, index) => ({ ...item, source_region: regions[index] })),
+    { source_type: "image", metadata: { recognition_id: "rec-1" } },
+  );
+  const pins = () => screen.queryAllByRole("button", { name: /^Finding \d+: / });
+
+  it("numbers the findings and draws pins only where the position is real", async () => {
+    server = photo([region(0.1, 0.2), null, region(0.6, 0.5)]);
+    renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    expect(within(row("Ladder")).getByLabelText("Finding 1")).toBeVisible();
+    expect(within(row("Rope")).getByLabelText("Finding 2")).toBeVisible();
+    expect(within(row("Lamp")).getByLabelText("Finding 3")).toBeVisible();
+
+    // No pin for the finding without a position, and one honest line about it.
+    expect(pins().map((pin) => pin.getAttribute("aria-label"))).toEqual(["Finding 1: Ladder", "Finding 3: Lamp"]);
+    expect(screen.getByText(/^1 of 3 findings is not marked on the photo/)).toBeVisible();
+    // A pin sits at the centre of its region.
+    expect(pins()[0]).toHaveStyle({ left: "20%", top: "35%" });
+    expect(pins()[1]).toHaveStyle({ left: "70%", top: "65%" });
+  });
+
+  it("says so when no position is known, and draws no pin at all", async () => {
+    server = photo([null, undefined, { x: 0.9, y: 0.2, width: 0.5, height: 0.1 }]);
+    renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    expect(pins()).toHaveLength(0);
+    expect(screen.getByText("Positions are not available for this photo.")).toBeVisible();
+    expect(screen.queryByTestId("finding-region")).not.toBeInTheDocument();
+  });
+
+  it("says nothing extra when every finding has a position, and shows no pins without a photo", async () => {
+    server = photo([region(0.1, 0.1), region(0.4, 0.4), region(0.7, 0.6)]);
+    const view = renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    expect(pins()).toHaveLength(3);
+    expect(screen.queryByText(/not marked on the photo|Positions are not available/)).not.toBeInTheDocument();
+
+    view.unmount();
+    server = batchOf([{ ...entry("e1", "Ladder"), source_region: region(0.1, 0.1) }]);
+    renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    expect(pins()).toHaveLength(0);
+    expect(within(row("Ladder")).queryByLabelText("Finding 1")).not.toBeInTheDocument();
+  });
+
+  it("links pins and rows both ways, with the keyboard too", async () => {
+    server = photo([region(0.1, 0.2), null, region(0.6, 0.5)]);
+    renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    const [ladderPin, lampPin] = pins();
+
+    // A pin takes the person to its row and marks it.
+    lampPin!.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(row("Lamp")).toHaveAttribute("data-marked", "true");
+    expect(row("Lamp")).toHaveFocus();
+    expect(lampPin).toHaveAttribute("aria-pressed", "true");
+    expect(row("Ladder")).not.toHaveAttribute("data-marked");
+    expect(screen.getByTestId("finding-region")).toHaveStyle({ left: "60%", top: "50%", width: "20%", height: "30%" });
+
+    // A row marks its pin: by pointer, by focus, and by selecting it.
+    await userEvent.hover(row("Ladder"));
+    expect(ladderPin).toHaveAttribute("aria-pressed", "true");
+    expect(lampPin).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Lamp" }));
+    expect(lampPin).toHaveAttribute("aria-pressed", "true");
+    expect(row("Lamp")).toHaveAttribute("data-selected", "true");
+    // A row without a position marks no pin.
+    await userEvent.hover(row("Rope"));
+    expect(pins().every((pin) => pin.getAttribute("aria-pressed") === "false")).toBe(true);
+  });
+
+  it("edits a tapped value through the bar, and the row still selects, adds and skips", async () => {
+    const { toast } = await import("sonner");
+    server = photo([region(0.1, 0.2), null, region(0.6, 0.5)]);
+    renderPage({ bar: true });
+    await screen.findByRole("article", { name: "Ladder" });
+
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: "Edit name of Ladder" }));
+    const field = await barField();
+    await userEvent.clear(field);
+    await userEvent.keyboard("{Enter}");
+    // Not valid: the editor stays, with the reason, and the draft is not changed.
+    expect(within(screen.getByTestId("bar-editor")).getByRole("alert")).toHaveTextContent("Give this item a name.");
+    expect(row("Ladder")).toBeVisible();
+    await userEvent.type(field, "Step ladder{Enter}");
+    expect(screen.queryByTestId("bar-editor")).not.toBeInTheDocument();
+    // The pin of the finding follows the corrected name.
+    expect(screen.getByRole("button", { name: "Finding 1: Step ladder" })).toBeVisible();
+
+    await userEvent.click(within(row("Step ladder")).getByRole("button", { name: "Edit quantity of Step ladder" }));
+    const quantity = await barField();
+    await userEvent.clear(quantity);
+    await userEvent.type(quantity, "2{Enter}");
+
+    // Selection and the row's own Add still work, with the corrected values.
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Step ladder" }));
+    expect(row("Step ladder")).toHaveAttribute("data-selected", "true");
+    expect(screen.getAllByRole("button", { name: "Add 1 selected item" }).length).toBeGreaterThan(0);
+    await userEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.post).mock.calls[0]![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e1", action: "import", proposed: expect.objectContaining({ name: "Step ladder", quantity: 2 }),
+    })] });
+    await waitFor(() => expect(within(row("Step ladder")).getByText("Added")).toBeVisible());
+
+    // Skip and Undo still work after a bar edit of another row.
+    await userEvent.click(within(row("Rope")).getByRole("button", { name: "Edit name of Rope" }));
+    const ropeName = await barField();
+    await userEvent.clear(ropeName);
+    await userEvent.type(ropeName, "Rope 30 m{Enter}");
+    await userEvent.click(within(row("Rope 30 m")).getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(screen.queryByRole("article", { name: "Rope 30 m" })).not.toBeInTheDocument());
+    expect(screen.getByText("Skipped (1)")).toBeVisible();
+    const undo = vi.mocked(toast.success).mock.calls.at(-1)![1] as { action: { label: string; onClick: () => void } };
+    expect(undo.action.label).toBe("Undo");
+    undo.action.onClick();
+    const back = await screen.findByRole("article", { name: "Rope 30 m" });
+    expect(within(back).getByLabelText("Finding 2")).toBeVisible();
+    expect(within(back).getByRole("button", { name: "Add item" })).toBeEnabled();
+  });
+
+  it("uses what is typed in the bar when Add is pressed without Enter, and keeps an earlier edit of the row", async () => {
+    server = photo([region(0.1, 0.2), null, region(0.6, 0.5)]);
+    renderPage({ bar: true });
+    await screen.findByRole("article", { name: "Ladder" });
+
+    // Name, then straight to the quantity without Enter: the name must not go back.
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: "Edit name of Ladder" }));
+    const name = await barField();
+    await userEvent.clear(name);
+    await userEvent.type(name, "Step ladder");
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: /^Edit quantity of/ }));
+    expect(row("Step ladder")).toBeVisible();
+    const quantity = await barField();
+    await userEvent.clear(quantity);
+    await userEvent.type(quantity, "3");
+
+    // Add while the quantity is still open in the bar.
+    await userEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.post).mock.calls[0]![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e1", proposed: expect.objectContaining({ name: "Step ladder", quantity: 3 }),
+    })] });
+    expect(screen.queryByTestId("bar-editor")).not.toBeInTheDocument();
+  });
+
+  it("does not add a row while the value open in the bar is not valid", async () => {
+    server = photo([region(0.1, 0.2), null, region(0.6, 0.5)]);
+    renderPage({ bar: true });
+    await screen.findByRole("article", { name: "Ladder" });
+
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: "Edit name of Ladder" }));
+    await userEvent.clear(await barField());
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: "Add item" }));
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(within(screen.getByTestId("bar-editor")).getByRole("alert")).toHaveTextContent("Give this item a name.");
+  });
+});
+

@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup as cleanupRender, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
+import { BarEditorBoundary } from "@/components/shell/bar-editor";
 import { DocumentProcessingStatus } from "@/components/document-processing-status";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
@@ -430,6 +431,20 @@ describe("DocumentExtractionReview", () => {
     expect(screen.getByLabelText(/^Destination room/)).toHaveValue("room-1");
     expect(screen.getByLabelText(/^Optional container/)).toHaveValue("location-1");
     expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps the place of a restored draft over the place chosen at capture", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      ...review,
+      line_states: { "line-1": { status: "pending", draft: {
+        action: "create", newItem: { name: "Cordless Drill", roomId: "", locationId: "" },
+      } } },
+    });
+    await renderReview(undefined, true, {
+      documentId: document.id, roomId: "room-1", locationId: "location-1",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Create new item" }));
+    expect(screen.getByLabelText(/^Destination room/)).toHaveValue("");
   });
 
   it("preserves an edited local draft when a new extraction version arrives", async () => {
@@ -971,7 +986,7 @@ describe("DocumentExtractionReview", () => {
     );
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       "/documents/document-1/extraction/lines/line-2/skip",
-      { description: "Bit set, 20 pieces", quantity: 1, line_total_cents: 2450 },
+      expect.objectContaining({ description: "Bit set, 20 pieces", quantity: 1, line_total_cents: 2450 }),
     ));
     await waitFor(() => expect(screen.queryByRole("article", { name: "Bit set, 20 pieces" })).not.toBeInTheDocument());
     expect(screen.getByText("Skipped (1)")).toBeVisible();
@@ -990,5 +1005,115 @@ describe("DocumentExtractionReview", () => {
     const restored = await screen.findByRole("article", { name: "Bit set, 20 pieces" });
     expect(within(restored).getByRole("checkbox")).not.toBeChecked();
     expect(screen.queryByText(/^Skipped \(/)).not.toBeInTheDocument();
+  });
+  it("keeps the complete draft of a skipped line: action, target, updates, new item and amounts", async () => {
+    let extraction: ExtractionReview & { line_states?: object } = twoLines;
+    vi.mocked(api.get).mockImplementation(async () => extraction);
+    vi.mocked(api.post).mockImplementation(async (path, body) => {
+      const sent = body as { draft?: object } | undefined;
+      const lineId = path.split("/").at(-2)!;
+      extraction = { ...twoLines, line_states: {
+        [lineId]: path.endsWith("/skip")
+          ? { status: "skipped", ...sent }
+          : { ...(extraction.line_states as Record<string, object>)[lineId], status: "pending" },
+      }, matches: extraction.matches };
+      return { line_states: extraction.line_states, applied_version: null };
+    });
+    const view = await renderReview(undefined, true, undefined, false, false);
+
+    // Line 2 becomes an update of the matched drill, with a new name, a changed total
+    // and extra stock. Line 3 becomes a new item with a room and a brand.
+    const drill = screen.getByRole("article", { name: "Cordless Drill" });
+    await userEvent.click(within(drill).getByRole("button", { name: "Edit" }));
+    await userEvent.click(within(drill).getByRole("button", { name: "Update details" }));
+    await userEvent.type(within(drill).getByLabelText(/^Name\s*Optional$/), "Drill, serviced");
+    await userEvent.clear(within(drill).getByLabelText(/^Line total/));
+    await userEvent.type(within(drill).getByLabelText(/^Line total/), "140.5");
+    await userEvent.click(within(drill).getByRole("checkbox", { name: /Add this quantity as new stock/ }));
+    await userEvent.click(within(drill).getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const bits = screen.getByRole("article", { name: "Drill Bit Set" });
+    await userEvent.click(within(bits).getByRole("button", { name: "Edit" }));
+    await userEvent.selectOptions(within(bits).getByLabelText("Destination room"), "room-1");
+    await userEvent.click(within(bits).getByText("More details"));
+    await userEvent.type(within(bits).getByLabelText(/^Brand/), "Bosch");
+    await userEvent.click(within(bits).getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+
+    const [drillSkip, bitsSkip] = vi.mocked(api.post).mock.calls.map(([, body]) => (body as { draft: Record<string, unknown> }).draft);
+    expect(drillSkip).toEqual(expect.objectContaining({
+      action: "update", itemId: "item-1", addQuantity: true, lineTotal: "140.5",
+      updates: expect.objectContaining({ name: "Drill, serviced" }),
+      candidate: expect.objectContaining({ id: "item-1", name: "Cordless Drill" }),
+    }));
+    expect(bitsSkip).toEqual(expect.objectContaining({
+      action: "create",
+      newItem: expect.objectContaining({ name: "Drill Bit Set", roomId: "room-1", brand: "Bosch" }),
+    }));
+
+    // Reload with what the server kept for the drill line, then Restore it.
+    extraction = { ...twoLines, matches: [], line_states: { "line-1": { status: "skipped", draft: drillSkip } } };
+    view.unmount();
+    await renderReview(undefined, true, undefined, false, false);
+    await userEvent.click(screen.getByText("Skipped (1)"));
+    await userEvent.click(screen.getByRole("button", { name: "Restore Cordless Drill" }));
+    const restored = await screen.findByRole("article", { name: "Cordless Drill" });
+    // The row is back with its action and target, its old → new value and its amounts,
+    // although the item is no longer among the proposed matches.
+    expect(within(restored).getByRole("button", { name: "Apply changes" })).toBeEnabled();
+    expect(within(restored).getByText("Drill, serviced").closest("li")).toHaveTextContent(
+      /Name: Cordless Drill.*Drill, serviced/,
+    );
+    expect(within(restored).getByText("140.5")).toBeVisible();
+    expect(within(restored).getByText("+2").closest("li")).toHaveTextContent("Stock: +2");
+
+    // Another reload after Restore still has the draft: Restore did not delete it.
+    view.unmount();
+    cleanupRender();
+    await renderReview(undefined, true, undefined, false, false);
+    const again = await screen.findByRole("article", { name: "Cordless Drill" });
+    expect(within(again).getByRole("button", { name: "Apply changes" })).toBeEnabled();
+    expect(within(again).getByText("Drill, serviced")).toBeVisible();
+  });
+  it("changes a tapped value of a closed line through the bar, with the same checks", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoLines);
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <BarEditorBoundary>
+            <DocumentExtractionReview document={document} />
+          </BarEditorBoundary>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Review extraction" }));
+    const bits = screen.getByRole("article", { name: "Drill Bit Set" });
+    const barField = async () => {
+      const field = within(await screen.findByTestId("bar-editor")).getByRole("textbox");
+      await waitFor(() => expect(field).toHaveFocus());
+      return field;
+    };
+
+    await userEvent.click(within(bits).getByRole("button", { name: "Edit line total of line 3" }));
+    let field = await barField();
+    await userEvent.clear(field);
+    await userEvent.type(field, "-5{Enter}");
+    expect(within(screen.getByTestId("bar-editor")).getByRole("alert")).toHaveTextContent("Enter an amount");
+    await userEvent.clear(field);
+    await userEvent.type(field, "19.90{Enter}");
+    expect(within(bits).getByRole("button", { name: "Edit line total of line 3" })).toHaveTextContent("19.90");
+
+    await userEvent.click(within(bits).getByRole("button", { name: "Edit name of line 3" }));
+    field = await barField();
+    await userEvent.clear(field);
+    await userEvent.type(field, "Bit set, 20 pieces{Enter}");
+    // The new item follows the corrected name, as with the field in the row.
+    const renamed = screen.getByRole("article", { name: "Bit set, 20 pieces" });
+    expect(within(renamed).getByRole("button", { name: "Edit name of the new item of line 3" })).toHaveTextContent("Bit set, 20 pieces");
+    // Selection still works after the edits, and nothing was sent.
+    await userEvent.click(within(renamed).getByRole("checkbox"));
+    expect(renamed).toHaveAttribute("data-selected", "true");
+    expect(api.post).not.toHaveBeenCalled();
   });
 });

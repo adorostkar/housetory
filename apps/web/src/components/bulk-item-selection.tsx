@@ -291,7 +291,7 @@ export function BulkSelectionControls({
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-2xs text-muted-foreground">
       {selection.selectableItems.length > 0 && (
-        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 sm:min-h-0">
+        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 sm:min-h-0 coarse:!min-h-11">
           <input
             ref={selection.selectAllRef}
             type="checkbox"
@@ -353,7 +353,7 @@ export function BulkItemActionBar({
   };
   const keyboardOpen = useSoftwareKeyboardOpen();
   const { anchor, box } = useAnchorBox(items.length > 0);
-  const touchButton = "h-11 px-3 sm:h-9";
+  const touchButton = "h-11 px-3 sm:h-9 coarse:!h-11";
   return (
     <>
       {/* Marks the list's column. The bar is fixed to the screen but lines up with it. */}
@@ -437,7 +437,7 @@ export function BulkItemActionBar({
             <Button
               size="icon"
               variant="ghost"
-              className="size-11 sm:size-9"
+              className="size-11 sm:size-9 coarse:!size-11"
               onClick={onClear}
               aria-label="Clear selection"
               title="Clear selection"

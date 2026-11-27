@@ -71,7 +71,7 @@ for (const flow of ["Add", "assistant"] as const) {
     // Each line is a closed row. Open the first one and select it for Apply.
     const firstLine = page.getByRole("article")
       .filter({ has: page.getByRole("checkbox", { name: /^Select line/ }) }).first();
-    await firstLine.getByRole("button", { name: "Edit" }).click();
+    await firstLine.getByRole("button", { name: "Edit", exact: true }).click();
     await firstLine.getByRole("button", { name: "Create new item" }).click();
     await firstLine.getByRole("checkbox", { name: /^Select line/ }).check();
     await page.getByLabel("New item name").first().fill(itemName);

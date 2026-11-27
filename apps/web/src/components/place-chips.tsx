@@ -272,7 +272,7 @@ export function PlaceListTools({
                   <button
                     type="button"
                     onClick={chip.remove}
-                    className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7 coarse:!size-11"
                     aria-label={`Remove ${chip.label}`}
                   >
                     <X className="size-3" />

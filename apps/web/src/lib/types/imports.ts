@@ -122,6 +122,12 @@ export interface ImportEntry {
   created_room_id?: UUID | null;
   created_location_id?: UUID | null;
   legacy_identifier?: string | null;
+  /**
+   * Where a photo finding is on the shown photo, in fractions of the picture
+   * (top-left corner, width and height, each 0 to 1). Null or absent when the
+   * position is not known. It is never guessed.
+   */
+  source_region?: { x: number; y: number; width: number; height: number } | null;
   error: string | null;
   position: number;
 }

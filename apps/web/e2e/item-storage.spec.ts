@@ -124,7 +124,8 @@ test("owned item provides contents while retaining purchase, warranty and value"
     storage_location_id: detail.item.storage?.location_id,
   });
   await page.reload();
-  await expect(page.getByText(`Torque wrench ${id}`)).toBeVisible();
+  // The new item is also a row in the list behind the panel; this is the item's own Contents.
+  await expect(page.getByTestId("item-panel").getByText(`Torque wrench ${id}`)).toBeVisible();
   await expect(page.getByText("1 item · 1 nested unit")).toBeVisible();
   // An item that holds things opens on Contents. The purchase is on Info and the
   // warranty on Documents.

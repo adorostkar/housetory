@@ -268,10 +268,15 @@ test("Review item origins preserve scope, queue filters, search and edit roundtr
   await panel.getByRole("link", { name: "Edit", exact: true }).first().click();
   await panel.getByLabel("Item name").fill(`Discarded context name ${id}`);
   await panel.getByRole("button", { name: "Cancel" }).click();
+  // The form is gone and the item is shown again, with its old name. (The form has
+  // the same heading and its own Close, which goes to the item, not to Review.)
+  await expect(panel.getByLabel("Item name")).toHaveCount(0);
+  await expect(panel.getByRole("link", { name: "Edit", exact: true }).first()).toBeVisible();
   await expect(
     panel.getByRole("heading", { name: `Renamed context drill ${id}` }),
   ).toBeVisible();
   await backToReview.click();
+  await expect(panel).toHaveCount(0);
   await expect(page.getByLabel("Search suggestions")).toHaveValue(
     `Context tools ${id}`,
   );

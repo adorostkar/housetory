@@ -98,9 +98,9 @@ for (const mobile of [false, true]) {
     await expect(dialog).toHaveCount(0);
     const panel = page.getByTestId("assistant-panel");
     const review = panel.getByLabel("Assistant capture status").last();
-    // The name is a field in the review row now, so it can be corrected in place.
+    // The name can be corrected from the row: tapping it opens it in the bottom bar.
     const row = review.getByRole("region", { name: "Assistant item review" }).getByRole("article", { name: itemName });
-    await expect(row.getByRole("textbox", { name: `Name of ${itemName}` })).toHaveValue(itemName);
+    await expect(row.getByRole("button", { name: `Edit name of ${itemName}` })).toHaveText(itemName);
     // Nothing is selected or added until the person does it.
     await expect(row.getByRole("checkbox", { name: `Select ${itemName}` })).not.toBeChecked();
     await expect(review).toBeInViewport();
@@ -124,7 +124,7 @@ for (const mobile of [false, true]) {
       .getByRole("button", { name: `Review ${title}`, exact: true }).first().click();
     const reopened = panel.locator(`[data-capture-id="${batchId}"]`);
     const reopenedRow = reopened.getByRole("article", { name: itemName });
-    await expect(reopenedRow.getByRole("textbox", { name: `Name of ${itemName}` })).toHaveValue(itemName);
+    await expect(reopenedRow.getByRole("button", { name: `Edit name of ${itemName}` })).toHaveText(itemName);
     // Each row has its own explicit Add item button.
     await reopenedRow.getByRole("button", { name: "Add item", exact: true }).click();
     await expect.poll(listed).toBe(1);

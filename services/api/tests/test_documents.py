@@ -358,3 +358,43 @@ def test_duplicate_upload_keeps_original_document_files(owner_client, upload_roo
     assert stored_files(upload_root) == original_files
     assert owner_client.get(first.json()["url"]).content == pdf_bytes
     assert owner_client.get(first.json()["original_url"]).content == pdf_bytes
+
+
+def _protected_pdf(*, user_password: str, owner_password: str) -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.encrypt(user_password=user_password, owner_password=owner_password)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_pdf_with_owner_restrictions_only_is_accepted(owner_client):
+    """Maker manuals often forbid printing or copying but open without a password."""
+    restricted = _protected_pdf(user_password="", owner_password="maker-secret")
+    response = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("manual.pdf", restricted, "application/pdf")},
+        data={"title": "Restricted manual", "document_type": "manual"},
+    )
+    assert response.status_code == 201, response.text
+    document = response.json()
+    assert document["extracted_metadata"]["processing"]["page_count"] == 1
+    original = owner_client.get(f"/api/v1/documents/{document['id']}/original")
+    assert original.status_code == 200
+    assert original.content == restricted
+
+
+def test_pdf_that_needs_a_password_is_refused(owner_client):
+    locked = _protected_pdf(user_password="open-sesame", owner_password="maker-secret")
+    response = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("locked.pdf", locked, "application/pdf")},
+        data={"title": "Locked", "document_type": "manual"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "encrypted_document"

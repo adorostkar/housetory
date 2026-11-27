@@ -11,6 +11,15 @@ export function Toaster() {
       closeButton
       toastOptions={{
         className: "font-sans",
+        // On touch the buttons of a message are 44 px. The small close button keeps
+        // its look and gets a tap area around it.
+        classNames: {
+          actionButton: "coarse:!h-11 coarse:!px-4",
+          cancelButton: "coarse:!h-11 coarse:!px-4",
+          // More to the right and down, because the button sits on the edge of the screen.
+          closeButton:
+            "coarse:before:absolute coarse:before:-bottom-4 coarse:before:-left-2 coarse:before:-right-4 coarse:before:-top-2 coarse:before:content-['']",
+        },
         style: {
           background: "hsl(var(--popover))",
           color: "hsl(var(--popover-foreground))",

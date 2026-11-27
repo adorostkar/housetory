@@ -288,6 +288,24 @@ def _require_search(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) ->
     return profile
 
 
+def _candidate_order() -> tuple:
+    """The maker's own file first, then other official sources, then the rest.
+
+    Candidates of one search share a creation time, so that time alone gives no
+    order at all.
+    """
+    return (
+        case(
+            (ManualSearchCandidate.source_type == "manufacturer", 0),
+            (ManualSearchCandidate.source_type == "official", 1),
+            else_=2,
+        ),
+        ManualSearchCandidate.retrieved_at.desc(),
+        ManualSearchCandidate.title.asc(),
+        ManualSearchCandidate.id.asc(),
+    )
+
+
 def _candidate_out(candidate: ManualSearchCandidate) -> ManualCandidateOut:
     direct_file = candidate.file_url != candidate.source_url or manual_web.is_pdf_url(
         candidate.file_url
@@ -359,7 +377,7 @@ def search_candidates(
                 ManualSearchCandidate.household_id == household_id,
                 ManualSearchCandidate.item_id == item_id,
             )
-            .order_by(ManualSearchCandidate.created_at.desc())
+            .order_by(*_candidate_order())
             .limit(50)
         ).all()
     )
@@ -387,7 +405,7 @@ def list_candidates(
                 ManualSearchCandidate.household_id == household_id,
                 ManualSearchCandidate.item_id == item_id,
             )
-            .order_by(ManualSearchCandidate.created_at.desc())
+            .order_by(*_candidate_order())
             .limit(50)
         ).all()
     )

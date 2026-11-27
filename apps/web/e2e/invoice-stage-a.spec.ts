@@ -436,7 +436,7 @@ test("late AI suggestions cannot replace an edited local review", async ({ page 
     exact: true,
   })).toBeVisible();
   await expect(merchant).toHaveValue("Manually reviewed shop");
-  await expect(page.getByRole("textbox", { name: /^Name of line/ }).first()).toHaveValue("Drill");
+  await expect(page.getByRole("button", { name: /^Edit name of line/ }).first()).toHaveText("Drill");
   expect(calls.filter((call) => call.startsWith("POST") || call.startsWith("PATCH"))).toEqual([]);
   expect(unexpected).toEqual([]);
   expect(pageErrors).toEqual([]);
@@ -452,10 +452,10 @@ test("presents one editable AI-assisted review with financial evidence", async (
     await page.getByRole("button", { name: "Review extraction", exact: true }).click();
     await expect(page.getByLabel(/^Merchant/)).toHaveValue("NORDIC TOOLS");
     // The line is a closed row; its amounts are in the editor.
-    await expect(page.getByRole("textbox", { name: /^Name of line/ }).first()).toHaveValue("Drill kit");
+    await expect(page.getByRole("button", { name: /^Edit name of line/ }).first()).toHaveText("Drill kit");
     await page.getByRole("article")
       .filter({ has: page.getByRole("checkbox", { name: /^Select line/ }) }).first()
-      .getByRole("button", { name: "Edit" }).click();
+      .getByRole("button", { name: "Edit", exact: true }).click();
     await expect(page.getByLabel(/^Merchant/)).toHaveCount(1);
     await expect(page.getByLabel(/^Merchant/)).toBeEditable();
     await expect(page.getByRole("button", {
@@ -495,7 +495,7 @@ for (const [operation, label] of [
     // The line is a closed row. Its possible matches are in the editor.
     await page.getByRole("article")
       .filter({ has: page.getByRole("checkbox", { name: /^Select line/ }) }).first()
-      .getByRole("button", { name: "Edit" }).click();
+      .getByRole("button", { name: "Edit", exact: true }).click();
     const sourceCandidate = page.getByRole("button", { name: /^Workshop drill/ });
     await expect(sourceCandidate).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: label, exact: true }).first().click();

@@ -252,7 +252,7 @@ export function ItemCard({
   if (!selection) return card;
   return (
     <div className="relative min-w-0">
-      <label className="absolute left-3 top-3 z-20 flex size-11 cursor-pointer items-center justify-center rounded-md border border-border/80 bg-background/90 shadow-sm backdrop-blur-md sm:size-6">
+      <label className="absolute left-3 top-3 z-20 flex size-11 cursor-pointer items-center justify-center rounded-md border border-border/80 bg-background/90 shadow-sm backdrop-blur-md sm:size-6 coarse:!size-11">
         <input
           type="checkbox"
           className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
@@ -384,7 +384,7 @@ export function ItemRow({
   if (!selection) return row;
   return (
     <div className="relative flex min-w-0 items-center">
-      <label className="ml-1 flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70 bg-card/70 sm:size-7">
+      <label className="ml-1 flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70 bg-card/70 sm:size-7 coarse:!size-11">
         <input
           type="checkbox"
           className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed"

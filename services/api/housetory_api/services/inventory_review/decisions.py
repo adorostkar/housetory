@@ -32,6 +32,8 @@ from .suggestion_out import (
     serialize_suggestion,
 )
 
+REVIEW_DRAFT_KEY = "review_draft"
+
 
 def _load_suggestion(
     db: Session, household_id: uuid.UUID, suggestion_id: uuid.UUID
@@ -374,6 +376,7 @@ def dismiss_suggestion(
     *,
     actor_user_id: uuid.UUID | None,
     actor_name: str | None,
+    draft: dict[str, Any] | None = None,
 ) -> ReviewDecisionOut:
     suggestion = _load_suggestion(db, household_id, suggestion_id)
     if suggestion.status == "dismissed":
@@ -385,6 +388,17 @@ def dismiss_suggestion(
             "skipped",
             f"This suggestion is {suggestion.status}; it was not dismissed.",
         )
+    if draft:
+        # The edit that was not applied is kept with the suggestion. It is not part of
+        # the fingerprint, so the memory of this dismissal is not changed by it.
+        suggestion.evidence_json = {**(suggestion.evidence_json or {}), REVIEW_DRAFT_KEY: draft}
+    elif draft is not None and REVIEW_DRAFT_KEY in (suggestion.evidence_json or {}):
+        # An empty draft: an edit kept earlier was taken back, so it must not return.
+        suggestion.evidence_json = {
+            key: value
+            for key, value in suggestion.evidence_json.items()
+            if key != REVIEW_DRAFT_KEY
+        }
     suggestion.status = "dismissed"
     suggestion.status_changed_at = datetime.now(UTC)
     suggestion.dismissed_at = datetime.now(UTC)

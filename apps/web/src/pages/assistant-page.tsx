@@ -37,7 +37,7 @@ import { useSearchSession } from "@/lib/search-session";
 import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope, type AssistantActionProposal, type AssistantCaptureState } from "@/lib/assistant-conversation";
 import { CONTINUE_REQUEST, MANUAL_PROPOSAL_KINDS } from "@/lib/assistant-tools";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
-import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments } from "@/lib/assistant-documents";
+import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments, useRelayBarEditorToReviews } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
 import type { AiRecognition, DocumentRecord } from "@/lib/types";
@@ -111,6 +111,7 @@ export function AssistantPage({
     selectImport,
     selectPhoto,
   } = useAssistantDocuments();
+  useRelayBarEditorToReviews();
   const session = useSession();
   const selectHousehold = useSelectHousehold();
   const { references: pageReferences, setReferences: setPageReferences } = useAssistantPageContext();
@@ -517,7 +518,8 @@ export function AssistantPage({
       <div className={headerContainer ? "min-w-0" : "shrink-0 pb-2"}>
         <div className="relative flex flex-wrap items-center gap-1">
           {!embedded && <h1 className="text-sm font-medium">Assistant</h1>}
-          <div className="min-w-0 flex-1 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:truncate"><SearchScopeControl scope={scope} compact /></div>
+          {/* The scope takes a line of its own when the sheet is too narrow for it and the buttons. */}
+          <div className="min-w-0 flex-1 basis-28 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:truncate"><SearchScopeControl scope={scope} compact /></div>
             <Button
               type="button"
               variant="ghost"
@@ -1038,7 +1040,7 @@ export function AssistantPage({
                   type="button"
                   disabled={tooManyReferences}
                   onClick={() => askSuggestion(suggestion)}
-                  className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground disabled:opacity-50"
+                  className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground disabled:opacity-50 coarse:min-h-11"
                 >
                   {suggestion}
                 </button>
@@ -1320,7 +1322,7 @@ function FollowUps({
           type="button"
           disabled={disabled}
           onClick={() => onAsk(suggestion)}
-          className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground disabled:opacity-50"
+          className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground disabled:opacity-50 coarse:min-h-11"
         >
           {suggestion}
         </button>
@@ -1479,6 +1481,7 @@ function AssistantAnswer({
                 String(document.url),
                 document.household_id ? String(document.household_id) : null,
               )}
+              className="coarse:inline-flex coarse:min-h-11 coarse:items-center"
             >
               <Badge
                 variant="secondary"
@@ -1501,6 +1504,7 @@ function AssistantAnswer({
               <Link
                 key={`${reference.type}-${reference.id}`}
                 to={withHousehold(reference.url, reference.household_id)}
+                className="coarse:inline-flex coarse:min-h-11 coarse:items-center"
               >
                 <Badge variant="outline" className="hover:bg-secondary">
                   {reference.title}

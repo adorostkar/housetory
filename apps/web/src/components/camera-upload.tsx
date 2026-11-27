@@ -63,7 +63,7 @@ export function CameraUpload({
       <button
         type="button"
         onClick={() => cameraRef.current?.click()}
-        className="flex size-10 items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="flex size-10 items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground coarse:size-11"
         aria-label="Take a photo"
         disabled={busy || uploading}
       >
@@ -73,7 +73,7 @@ export function CameraUpload({
         <button
           type="button"
           onClick={() => libraryRef.current?.click()}
-          className="flex size-10 items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          className="flex size-10 items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground coarse:size-11"
           aria-label="Choose a photo"
           disabled={busy || uploading}
         >

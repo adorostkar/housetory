@@ -230,7 +230,7 @@ export function MembersSettingsPage() {
                           nextRole: event.target.value as MemberRole,
                         })
                       }
-                      className="h-9 w-[130px] text-xs"
+                      className="h-9 w-[130px] text-xs coarse:h-11"
                     >
                       {Object.entries(ROLE_LABELS).map(([value, label]) => (
                         <option key={value} value={value}>

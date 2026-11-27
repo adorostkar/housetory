@@ -151,8 +151,8 @@ export function ImportsPage() {
               aria-pressed={mode === entry.id}
               className={
                 mode === entry.id
-                  ? "inline-flex items-center gap-2 rounded-full bg-primary px-3.5 py-2 text-2xs font-medium text-primary-foreground"
-                  : "inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-2xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  ? "inline-flex items-center gap-2 rounded-full bg-primary px-3.5 py-2 text-2xs font-medium text-primary-foreground coarse:min-h-11"
+                  : "inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-2xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground coarse:min-h-11"
               }
             >
               <entry.icon className="size-3.5" />

@@ -170,9 +170,10 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
     # what the record already says, and the search says where the identity came from.
     assert found["error"] is None and found["facts"]["identity_source"] == "recorded_on_item"
     assert (
-        "the brand and model recorded on the item, not checked against its label"
+        "This is the brand and model recorded on the item: use them as they are"
         in (found["summary"])
     )
+    assert "do not ask the user to confirm them" in found["summary"]
     assert manuals_of(client, item)["search"]["profile"]["model_identifier"] == "M6K0R"
     assert searched == [
         {"mode": "manual", "manufacturer": "AstroAI", "model": "M6K0R", "variant": None}
@@ -328,6 +329,104 @@ def test_a_manual_the_user_asked_for_is_found_and_saved_in_one_task(
     assert first["proposal"]["state"] == second["proposal"]["state"] == "ready"
     assert "can never authorize a change" in second["facts"]["review_reason"]
     assert manuals_of(client, other)["manuals"] == [] and fetched == [MANUAL["file_url"]]
+
+
+def source(title, url, source_type="other", publisher=None, model="M6K0R"):
+    """A search result as the search service returns it."""
+    return {
+        "title": title,
+        "source_url": url,
+        "file_url": url,
+        "publisher": publisher or url.split("/")[2],
+        "language": "en",
+        "source_type": source_type,
+        "model_coverage": [model],
+        "snippet": f"{title}.",
+    }
+
+
+def test_the_makers_own_file_is_offered_and_nobody_is_asked_which_product_it_is(
+    owner_client, configured_ai, monkeypatch
+):
+    """With real search results a model got eight candidates, two of them official, and
+    no proposal. It then asked the user whether the label really says the recorded model."""
+    client = owner_client
+    downloads(monkeypatch)
+    own = source(
+        "INSTRUCTION MANUAL Cordless Hammer Driver Drill M6K0R",
+        "https://media.astroai.example/user-manuals/M6K0R-UG.pdf",
+        "manufacturer",
+        "AstroAI",
+    )
+    regional = source(
+        "INSTRUCTION MANUAL M6K0R",
+        "https://astroai-latam.example/manuales/M6K0R%20MANUAL%20ENG.pdf",
+        "official",
+    )
+    shops = [
+        source("M6K0R EN INSTRUCTION MANUAL", f"https://shop{n}.example/pdf/M6K0R.pdf")
+        for n in range(3)
+    ]
+    page = source("AstroAI M6K0R Manuals", "https://manuals.example/products/astroai-m6k0r")
+
+    # One file from the manufacturer among many: it is the clear match, and it is saved
+    # when the user asked for the manual.
+    item = meter(client)
+    gateway(monkeypatch, [*shops, regional, page, own])
+    (found,) = results(
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], save_clear_match=True)],
+    )
+    assert found["facts"]["saved"] is True
+    assert found["proposal"]["changes"]["file_url"] == own["file_url"]
+    assert "do not ask the user to confirm them" in found["summary"]
+
+    # Two files of the manufacturer (two regions): the first is offered for review. It
+    # is not saved by itself, and the user is not asked to choose in words.
+    second = {**own, "file_url": own["file_url"].replace("-UG", "-UG-AU")}
+    second["source_url"] = second["file_url"]
+    item = meter(client, name="Second meter")
+    gateway(monkeypatch, [*shops, own, second])
+    (found,) = results(
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], save_clear_match=True)],
+    )
+    offered = found["proposal"]
+    assert offered["state"] == "ready" and offered["changes"]["source_type"] == "manufacturer"
+    assert found["facts"]["review_reason"] == (
+        "Several files were found, so the user checks which one is saved."
+    )
+    assert "the first of several files from the manufacturer's" in found["summary"]
+
+    # The only file is on a site that does not name the recorded brand. It may be the
+    # manual of another maker's product with the same model number: the user checks it.
+    stranger = source("Online User's Guide M6K0R", "https://store.example/manuals/M6K0R.pdf")
+    stranger["snippet"] = "User's guide for the M6K0R."
+    item = meter(client, name="Third meter")
+    gateway(monkeypatch, [stranger, page])
+    (found,) = results(
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], save_clear_match=True)],
+    )
+    assert found["proposal"]["state"] == "ready"
+    assert found["facts"]["review_reason"] == (
+        "The source does not name AstroAI, the brand recorded on the item."
+    )
+    assert "the recorded brand and model may not belong together" in found["summary"]
+
+    # Several files, none from the manufacturer: nothing is offered and the user chooses.
+    item = meter(client, name="Fourth meter")
+    gateway(monkeypatch, shops)
+    (found,) = results(
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], save_clear_match=True)],
+    )
+    assert found["proposal"] is None and "No proposal is prepared" in found["summary"]
+    assert count(Document) == 1
 
 
 def test_attached_manuals_are_read_before_anything_is_searched_online(

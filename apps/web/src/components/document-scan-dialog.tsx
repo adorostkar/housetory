@@ -458,8 +458,23 @@ export function DocumentScanDialog({
     applyAdjustments(activePage.id, { ...activePage.adjustments, corners });
   };
 
+  // Escape, an outside tap or the ✕ must not throw scanned pages away by accident.
+  // They ask first. "Cancel scan" is the explicit way to discard.
+  const [confirmDiscard, setConfirmDiscard] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  const requestClose = () => {
+    if (saving || uploading) return;
+    if (!targetDocumentId && pagesRef.current.length > 0 && !committedRef.current) {
+      setConfirmDiscard(true);
+      return;
+    }
+    void close();
+  };
+
   const close = async () => {
     if (saving || uploading) return;
+    setConfirmDiscard(false);
+    setSaveError(null);
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -483,6 +498,8 @@ export function DocumentScanDialog({
     if (!scanIdRef.current || pages.length === 0 || saving || uploading) return;
     setSaving(true);
     setError(null);
+    setSaveError(null);
+    setConfirmDiscard(false);
     try {
       await flushPending();
       const document = await api.post<DocumentRecord>(
@@ -506,7 +523,8 @@ export function DocumentScanDialog({
       onSaved?.(document);
       onOpenChange(false);
     } catch (caught) {
-      setError(getApiErrorMessage(caught));
+      // Pages, details and item links stay exactly as they are. Only the save failed.
+      setSaveError(getApiErrorMessage(caught));
     } finally {
       setSaving(false);
     }
@@ -519,7 +537,7 @@ export function DocumentScanDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) void close();
+        if (!next) requestClose();
         else onOpenChange(true);
       }}
     >
@@ -533,7 +551,7 @@ export function DocumentScanDialog({
               className="absolute right-3 top-3 size-10"
               aria-label="Close"
               disabled={busy}
-              onClick={() => void close()}
+              onClick={requestClose}
             >
               <X />
             </Button>
@@ -1006,6 +1024,28 @@ export function DocumentScanDialog({
           </div>
 
           <div className="shrink-0 border-t border-border/60 bg-popover px-5 py-3 sm:px-7">
+            {confirmDiscard && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-secondary/30 px-3.5 py-2.5">
+                <p role="alert" className="text-xs">
+                  This scan is not saved yet. Discard its pages and details?
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                    onClick={() => setConfirmDiscard(false)}>
+                    Keep editing
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" className="min-h-11 lg:min-h-9"
+                    onClick={() => void close()}>
+                    Discard scan
+                  </Button>
+                </div>
+              </div>
+            )}
+            {saveError && (
+              <p role="alert" className="mb-3 break-words text-xs text-destructive">
+                The scan is not saved yet. {saveError} Everything you entered is still here.
+              </p>
+            )}
             <DialogFooter className="max-sm:static max-sm:mx-0 max-sm:border-0 max-sm:p-0">
               <Button type="button" variant="ghost" onClick={() => void close()} disabled={busy}>
                 <X />
@@ -1017,7 +1057,7 @@ export function DocumentScanDialog({
                 disabled={!scanId || pages.length === 0 || busy || pageBusy || previewFailed}
               >
                 {saving ? <Spinner /> : <Check />}
-                {targetDocumentId ? "Save cleaned document" : "Save scanned document"}
+                {saveError ? "Retry" : targetDocumentId ? "Save cleaned document" : "Save scanned document"}
               </Button>
             </DialogFooter>
           </div>

@@ -17,6 +17,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | 4 | Inventory-first navigation and everyday flows | Done (see "Phase 4 record") |
 | 5 | Secondary flows and account design | Done (see "Phase 5 record") |
 | 6 | Verification and final handoff | Done (see "Phase 6 record" and "Final checklist") |
+| — | Correction batch after the review of Phase 6 | Done (see "Correction batch record") |
 
 All phases are finished and pushed to the branch. Nothing is merged or deployed.
 What is not complete is listed plainly under "Not complete" near the end.
@@ -591,6 +592,301 @@ They cover a 390 px phone (16 screens), a 320 px phone, landscape, a tablet, a
 dark. The real-model record is next to them in `REAL_MODEL_CHECK.md`. The
 clickable Design D mock is in `~/Downloads/housetory-mock-design-D.zip`.
 
+## Correction batch record
+
+Phase 6 was reviewed at `a846424`. The review asked for seven corrections.
+This is what was done for each, on 27 Nov 2026.
+
+### 1. A failed save of document details no longer loses them
+
+Before, closing the add-a-document surface or pressing Done cleared the typed
+details before the save had worked.
+
+Now Done, ✕, Escape and a tap outside all first send the pending details and
+item links. While that runs the surface cannot be closed. If the save fails,
+the surface stays open with every field as typed, the server's message beside
+the button, **Retry** and **Discard changes**. "Discard changes" says that the
+document itself stays in the library. The surface closes only after a save
+that worked, or after Discard. If the first upload fails, the chosen file is
+kept and Retry is offered. The scan dialog asks before it drops pages or
+details, and a failed save there keeps everything too.
+
+### 2. Skip → reload → Restore keeps the whole edited draft
+
+What was lost before the fix:
+
+| Review kind | Lost |
+| --- | --- |
+| Import and photo rows | the chosen action, the duplicate to merge with, the fields to merge |
+| Place and container rows | everything: name, quantity, description, kinds, parent, old identifier, "allow duplicate" |
+| Document lines | everything but description, quantity and line total; Restore also deleted the note of the skip |
+| Inventory suggestions ("Edit first") | the edited name and category, when the dialog closed |
+
+Now the server stores the complete draft with the skip, in the JSON that each
+row already has. No migration was needed. A reload returns it, Restore leaves
+it alone, and a later Add uses it. This covers identity (name, make, model,
+serial number), location, prices and dates, the action and its target, and
+the other fields of the row editor.
+
+Tests: for each kind a backend test edits every field group, skips, reads
+again, restores, reads again, compares the whole draft, then adds the row and
+checks the saved record. Frontend tests check that a restored row shows the
+edited values and the action.
+
+### 3. Selected review rows are highlighted
+
+A selected row has a background (`bg-accent`), a border in the main colour
+and a bar on its left edge, next to the checked box. It carries
+`data-selected="true"`. On that background the "Check: …" and error lines use
+the normal text colour with a coloured icon, because the brass and red text
+were too weak there.
+
+Contrast on the selected row, computed from the theme colours and measured
+again in the running app:
+
+| Theme | Text | Muted text | Edge against the page |
+| --- | --- | --- | --- |
+| Current, light | 13.0 | 4.8 | 14.4 |
+| Current, dark | 11.7 | 5.4 | 16.8 |
+| Design D, light | 11.7 | 5.5 | 9.1 |
+| Design D, dark | 12.3 | 6.1 | 10.2 |
+| Field notes, light | 11.7 | 5.1 | 6.8 |
+| Field notes, dark | 8.8 | 5.8 | 10.0 |
+| Collected, light | 9.5 | 4.6 | 5.8 |
+| Collected, dark | 11.2 | 6.8 | 9.1 |
+
+Text needs 4.5 and an edge needs 3. The background alone differs from the
+card by only about 1.2 to 1.3, so the border, the bar and the checkbox carry
+the selection, not the tint alone.
+
+### 4. Numbered findings, pins on the photo, editing in the bottom bar
+
+**Positions come from the recognition itself.** The same single request to the
+vision model now also asks for a box around each thing it found, as fractions
+of the picture. The prompt says: "Use null when you are not sure. Never guess
+a box." The server never makes a position up. It drops a box that is not
+well-formed, lies outside the picture, is tiny, covers almost the whole
+picture when there are several findings, or is the same as another finding's
+box. If more than half of the boxes of one photo fail these checks, all of
+them are dropped. Pixel values are not converted, because their scale cannot
+be known. What is left is stored as `source_region` on each entry, or `null`.
+
+**The picture shown and the picture read are the same.** The review shows the
+stored upright copy. For a photo that the phone saved turned (EXIF), or a HEIC
+photo, the model now gets that upright copy, so positions fit. If the two
+cannot be shown to match, the photo gets no positions at all.
+
+**In the app.** Findings are numbered. The photo shows a numbered pin, 44 px,
+at the middle of each finding that has a position. A pin and its row are
+linked both ways and work with the keyboard. A finding with no position gets
+no pin. The page then says so in plain words: "Positions are not available
+for this photo." or "1 of 9 findings is not marked on the photo: its position
+is not known."
+
+**Editing in the bar.** Tapping a name, a quantity, a serial number, a price,
+a line total or "Add as" on a closed row opens that value in the bottom bar.
+Enter or ✓ saves, Escape or ✕ cancels and puts the focus back on the value.
+The same checks apply as before; a value that is not valid keeps the editor
+open with the reason. A tap on any other control (Add, Skip, a checkbox,
+another value) first saves the open value, so the action never uses the old
+one; if the open value is not valid, that tap does nothing until it is fixed
+or cancelled. The editor closes without saving when the page changes. This
+works on the page and inside the assistant sheet, for import, photo, place
+and document rows. Selection, per-row Add, Skip, Undo and Restore are
+unchanged. Outside the shell the old inline fields remain.
+
+**Checked with the real model** (`openai/gpt-6-luna`, 10 vision requests, on
+made-up photos):
+
+| Set | Pins on the right thing |
+| --- | --- |
+| Pictures built from known tiles | 16 of 16 |
+| Real photos of a pantry and a toolbox, judged by eye | 31 of 33 |
+| Photos saved turned by the phone | same positions as upright, within 0.01 |
+
+The two misses were a half-hidden carton, and one box around two jars that
+stood apart. The prompt now says to box a group only when its things stand
+together. **Limit:** only this one model was tried. The server can refuse a
+broken box, but it cannot know that a well-formed box is on the wrong thing.
+
+### 5. Touch targets
+
+A new end-to-end file, `e2e/touch-targets.spec.ts`, measures every control on
+a touch phone at 390 and 320 px and on a touch tablet. It does not trust the
+drawn size. From the middle of each control it walks outwards and asks the
+browser which element answers at each point, so a label or an enlarged tap
+area counts, and a neighbour that covers part of a control is found. It fails
+for an area under 44 px either way, for a control that cannot be tapped, and
+for a page wider than the screen. Only two exceptions are allowed: a link or
+text button inside a sentence, and a control that the browser sizes and the
+app does not style.
+
+It found 327 controls in 237 screen states. All are fixed, mostly with
+touch-only rules, so the desktop keeps its density. It also found three pages
+that were wider than the phone (labels at 390 px; a document page and
+warranties at 320 px); these are fixed. Later runs with other data found
+three more (the link to a nested room, "Clear" in the model picker, and the
+dialog Close button on a touch tablet); these are fixed too, and the audit's
+own data now shows them every time. The last run: 254 screen states, 5,098
+controls, no finding. With a mouse nothing changed in size.
+
+### 6. The production build behind nginx
+
+The built app was run as in production: the repository's own Docker images,
+nginx in front, in a throwaway stack with its own volumes. The PWA test that
+could not run in Phase 6 passes.
+
+| End-to-end file, against the production build | Passed |
+| --- | --- |
+| `ai-camera-import` (with the PWA test) | 6 of 6 |
+| `navigation` | 10 of 10 |
+| `offline-resource-audit` | 1 of 1 |
+| `release-stabilisation` | 2 of 2 |
+| `responsive-mobile` | 14 of 14 |
+| `touch-targets` | 8 of 8 |
+
+The build was made twice: once in the middle of the batch and once at the end
+with all corrections in it. Both passed. Two touch-only size changes (the link
+to a nested room, and "Clear" in the model picker) were made after the last
+build; they were checked on the development server only.
+
+Checked by hand on that build, all passing: the manifest (`standalone`) and
+its icons; `/sw.js` is served with `no-cache`, registers and takes control;
+an old `housetory-shell-v1` cache is deleted and only `v2` stays; nothing
+under `/api/` is cached; a hard reload of `/items/<id>` and
+`/settings/appearance` works; the Content-Security-Policy header is present
+and nothing is blocked on the list, an item, the assistant, the desktop panel
+or Appearance in all four themes, light and dark. Offline, the service worker
+answers and the app shows its own "can't reach its server" screen with "Try
+again"; it does not show the list offline, and it never did.
+
+Two small things were seen and left, both older than this programme: offline,
+the worker does not serve `/theme-init.js`, the icon and the manifest, though
+it stores them; and the offline screen says "Check that the API container is
+running", which is odd wording for a person who is only offline.
+
+### 7. Online manual discovery with a real search and a real model
+
+Run on made-up data with Brave Search and `openai/gpt-6-luna`. It used 11
+searches and about 55 model requests. No key was printed or stored outside
+the throwaway database, which is deleted.
+
+| Case | Result |
+| --- | --- |
+| Settings show that online search is ready | Pass |
+| Item page: search, pick, download, open the PDF | Pass for a Makita manual (1.98 MB). A web page that is not a file gets a plain message. Brother's official PDF was refused; fixed, see below |
+| Assistant on an item: "find the manual" | Pass on the first try. No question about identity. DeWalt's own PDF saved in one task |
+| Item with too little or conflicting identity | Pass. It asks for the label details and saves nothing. It does not name the conflict itself |
+| From the list, no item open | Failed first: it asked "Does the label say DHP482?". Passes after the fix |
+| A made-up model | Pass. Plain "could not find", a next step, no link |
+| Stop during a search | Pass. Nothing is saved afterwards |
+| In the browser at 390 and 1440 px | Failed first on the phone: the question typed in the bar lost the "This item" context. Passes after the fix |
+
+No answer named a link or a site that was not in the search results.
+
+Fixes that came out of this check:
+
+- Brother's support page names every file link only "Download", so its files
+  were not found. A link is now named by its table row.
+- The maker's own file is offered first. Several official files give one
+  proposal, not a question. One file whose source does not name the brand
+  stays a proposal. The tool's result no longer pushes the model to ask about
+  the label.
+- A question typed in the bar on an item page now carries the item with it.
+- A PDF that only forbids printing or copying, but opens without a password,
+  was refused as "encrypted". Many makers' manuals are like that. Now only a
+  PDF that needs a real password is refused.
+- The list of found manuals was in no fixed order. It now shows the maker
+  first, then other official sources, then the rest.
+- The help text under an item's documents said the assistant always asks
+  before it saves a manual. It now says what really happens.
+
+Not checked with the real services: steering in the middle of a manual
+search, and a real case of a file whose source does not name the brand. Both
+are covered by scripted tests only.
+
+### Defects found by a review of the batch, and fixed
+
+A separate read-only review of the whole batch found six defects before the
+commit. All are fixed, each with a test:
+
+- A value typed in the bar was not used when Add or Skip was pressed without
+  Enter first.
+- Editing the name and then the quantity of one row, without Enter between
+  them, put the old name back.
+- The editor stayed open over the next page after going back.
+- An inventory suggestion's kept edit could not be taken back: it returned
+  after a reload.
+- On a document line, the place chosen at capture replaced a place that was
+  changed, skipped and restored.
+- A position with a number too large to store failed the whole photo instead
+  of only dropping that position.
+
+The review found nothing serious in the document dialogs, the kept drafts of
+import and place rows, the storage of positions, the PDF check, the manual
+search changes or the touch-target changes.
+
+### Checks after the corrections
+
+On the final tree:
+
+| Check | Result |
+| --- | --- |
+| Web type check and production build | clean |
+| Web unit tests | 84 files, 593 tests, all pass |
+| Backend tests | 919 tests, 917 pass; the 2 failures are the known ones in `tests/test_actual_inventory.py` |
+| Backend lint (ruff) | clean |
+| End-to-end, 54 files (the 53 of Phase 6 and `touch-targets`) | 215 pass, 1 skipped, none fail |
+| The same against the production build behind nginx (6 files) | 41 of 41 |
+
+Notes on the end-to-end run, stated plainly:
+
+- The skipped test is `assistant-review-live`, which needs a real model. It
+  passed in Phase 6 with one.
+- `review-memory` and `review-overview` only run on a database with a special
+  name. They were run as copies with that one check changed.
+- Some files need a fresh database, because other files leave a second
+  household or open reviews behind. They were run in an order that gives them
+  one. One test file was corrected for this: `responsive-mobile` now accepts
+  the robot button's name with a count of open reviews.
+- Seven files of the assistant and document set were last run just before the
+  final small change to the name label of a review row. They do not use that
+  label.
+- No failing test was simply repeated until it passed. Where a file failed,
+  the cause was found: data left by other files (solved by the order), or the
+  test file itself (one line in `item-storage`, which matched two rows once
+  the list behind the item panel also showed the new item).
+
+**Journeys after the fixes**, by script in desktop Chrome at 390 × 844 with
+touch and at 1440 × 900. All 15 pass:
+
+1. List → item (page on the phone, side panel on the desktop) → edit → back,
+   with the list at the same place.
+2. Room → container → move an item with the bulk bar.
+3. Record a loan and its return.
+4. Add one item by hand.
+5. Add a document where saving the details fails once: the surface stays
+   open with the fields kept, Retry saves; and again with "Discard changes".
+6. Paste a short list → review: correct a name and a quantity in the bar, a
+   wrong quantity is held with its message, a typed name is used by "Add item"
+   without Enter, two rows selected and marked in all eight theme variants,
+   Skip → reload → Restore keeps the name and the quantity, the added items
+   carry the corrected values.
+7. The same editing with the keyboard only (desktop).
+8. Each of the four colour themes applies and stays after a reload.
+
+**This is a phone-sized window in desktop Chrome. It is not an iPhone.** The
+real keyboard, gestures and the installed PWA on a phone remain a separate
+device check for Ashkan.
+
+### Evidence
+
+Kept outside the repository, on the development machine, under
+`~/.copilot/session-state/3641ec55-9ea3-4388-a02a-630e6e621ce5/files/mfp-runtime/`:
+`GEOMETRY_CHECK.md` and `geometry/` (pictures with the boxes drawn),
+`MANUAL_DISCOVERY_CHECK.md` and `manual-check/`, `correction-shots/` (pins,
+bar editing, the selected row in all themes) and `journeys/`.
+
 ## Final checklist
 
 State is one of: **Done**, **Partly** (with what is missing), **Not done**.
@@ -653,12 +949,12 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | Manuals do not open a purchase review | Done | left out of pending captures |
 | One compact row for all four review kinds | Done | `components/review-row.tsx` |
 | Old → new for existing records; read values for new ones | Done | row body |
-| Uncertain fields are clear and can be edited | Done | "Check: …" line; inline name and quantity |
+| Uncertain fields are clear and can be edited | Done | "Check: …" line; name, quantity and other values open in the bottom bar |
 | Empty fields under "More details" | Done | row editor |
 | Checkboxes select only; nothing selected at first; Select all | Done | all four kinds |
 | A direct Add or Apply on each row | Done | per-row button |
 | Bulk button says what it does; off when nothing is selected; separate counts | Done | "Add 3 selected items" and similar |
-| Skip removes the row, offers Undo, keeps edits | Done | "Skipped (n)" with Restore |
+| Skip removes the row, offers Undo, keeps edits | Done | "Skipped (n)" with Restore; the whole draft is kept on the server |
 | Dismissals are remembered; reassessment still possible | Done | server state; "Reconsider dismissed" kept |
 | Way back to skipped work after the message is gone | Done | "Skipped (n)" part |
 | No routine Import/Skip/Reject dropdowns; merge only for duplicates | Done | removed |
@@ -666,7 +962,9 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | Partial failure keeps what worked and what is left | Done | failed rows stay selected |
 | Quiet line for optional suggestions in chat | Done | "N possible corrections · View suggestions" |
 | An accepted row cannot be added twice | Done | server rules kept; row loses its actions |
-| A small picture on each row where useful | Partly | photo reviews show the source photo once, above the rows |
+| A small picture on each row where useful | Partly | photo reviews show the source photo once, with a numbered pin for each finding that has a position |
+| A selected row is clearly marked | Done | background, border and bar, in all four themes |
+| A failed save keeps the typed details | Done | Retry and "Discard changes" on the document surface |
 
 ### Phase 3: assistant
 
@@ -773,13 +1071,15 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | 3. Browse or search → item → edit, documents, loans → back | Done | end-to-end and by hand |
 | 4. Room and container browsing; move selected items | Done | end-to-end |
 | 5. Lend, borrow, partial return, correction | Done | end-to-end |
-| 6. Assistant: general help, evidence, manual discovery, correction, Undo | Partly | real model for all but online manual discovery, which ran with a fixture search only |
+| 6. Assistant: general help, evidence, manual discovery, correction, Undo | Done | real model for all parts; manual discovery also with a real search (correction batch, point 7) |
 | 7. Long work, steering, stopping, recovery | Done | real model for stop and steer; scripted for recovery |
 | 8. Insurance export, stocktake, Settings | Done | end-to-end |
 | 9. No AI, permissions, household isolation | Done | end-to-end and backend tests |
 | Phone at 320, 390 and 430 px, short and landscape, tablet, desktop | Partly | 320, 390, landscape, 768 and 1440 px were checked; 430 px was not checked on its own |
 | Empty, large, loading and error states | Partly | covered where the end-to-end files cover them; not walked through one by one |
-| Real iPhone and PWA | **Not done** | no device |
+| Production build behind nginx, as a PWA in desktop Chrome | Done | correction batch, point 6 |
+| Touch targets of 44 px | Done | `e2e/touch-targets.spec.ts`, correction batch, point 5 |
+| Real iPhone and installed PWA on a phone | **Not done** | no device; this is a separate check for Ashkan |
 
 ## Commits
 
@@ -794,7 +1094,8 @@ All on `feat/mobile-first-programme`, on top of `main` at `f026cae`.
 | `4ee2b4b` | Phase 3 |
 | `1f59cf8` | Phase 4 |
 | `ea69ef7` | Docs in line with the new interface; touch targets |
-| the commit after `ea69ef7` | Phase 6: end-to-end files, fixes found by them, real-model fixes, this record |
+| `a846424` | Phase 6: end-to-end files, fixes found by them, real-model fixes, the Phase 6 record |
+| the commit after `a846424` | Correction batch: the seven points of the review, and this record |
 
 The phases were built side by side, so they are not in number order.
 
@@ -815,16 +1116,13 @@ The phases were built side by side, so they are not in number order.
 The mock was a sketch with made-up data. These parts of it were **not** built
 as drawn:
 
-1. **Photo review with numbered pins.** The mock put numbered pins on the
-   photo. The app shows the photo once above the rows, with no pins. Photo
-   recognition returns names and values but no positions in the picture, so
-   pins need a change to what the AI is asked for and to what is stored. That
-   was not done.
-2. **Correcting a finding by typing in the bottom bar.** In the mock, tapping a
-   value moved it into the bar for editing. In the app, name and quantity are
-   edited in the row itself, and other fields in the row's editor. This
-   follows the specification ("small corrections happen inline") but it is not
-   what was chosen in the mock.
+1. **Photo review with numbered pins.** Built in the correction batch. One
+   difference remains: a pin is shown only where the recognition gave a
+   position that passed the checks. A finding without one has a number and a
+   row but no pin, and the page says so.
+2. **Correcting a finding by typing in the bottom bar.** Built in the
+   correction batch, for the values shown on a closed row. Fields that are
+   not on the closed row are still edited in the row's editor.
 3. **The Add menu.** The mock's + opened a small menu with three choices. The
    app's + opens the existing "Add items" surface, where text, a link, a photo
    or voice go into one field. The paperclip opens the file chooser at once.
@@ -834,7 +1132,8 @@ as drawn:
 5. **Fonts.** The mock used its own fonts. The app keeps its fonts in all four
    themes.
 
-Points 1 and 2 are the largest gaps. They can be built later if wanted.
+The mock's shortcut "a question mark means a question, anything else is a
+note" was left out on purpose (point 3 of the decision).
 
 ## Known limits and deferred work
 
@@ -848,7 +1147,18 @@ Points 1 and 2 are the largest gaps. They can be built later if wanted.
   before the programme.
 - **The review count on the robot button** can lag up to 30 seconds after an
   Add-items capture.
-- **Photo review rows** have no picture each.
+- **Photo review rows** have no picture each. They have a number, and a pin
+  on the shared photo when the position is known.
+- **Positions on photos** were tried with one vision model only. Another model
+  may give fewer or worse positions; bad boxes are dropped, wrong but
+  well-formed ones cannot be detected.
+- **A correction on a review row that is neither skipped nor added** lives in
+  the page only. A reload brings the row back as it was read. Skip keeps it.
+- **Offline**, the app shows its "can't reach its server" screen, not the
+  inventory. The wording of that screen speaks of the "API container".
+- **"Rotate credentials"** in the AI settings acts without asking first, and
+  Escape does not close a dialog while the focus is on an open list. Both
+  were noticed in the touch audit, are older than this work, and were left.
 - **Document matching** sorts equally strong matches by name. Older than this
   work.
 - **In the new loan dialog**, the name list still covers "More options" while a
@@ -859,22 +1169,26 @@ Points 1 and 2 are the largest gaps. They can be built later if wanted.
 
 ## Not complete
 
-Stated plainly:
+Stated plainly, after the correction batch:
 
-1. **No check on a real iPhone or as an installed PWA.** The keyboard and the
-   bottom-bar space are only tested with a shorter browser window.
+1. **No check on a real iPhone or as an installed PWA on a phone.** The
+   keyboard, the gestures and the bottom-bar space are only tested in desktop
+   Chrome, with a phone-sized window, touch turned on and a shorter window to
+   act like a keyboard. That is not the same as an iPhone. This is a separate
+   device check for Ashkan. Problems found there are to be fixed then.
 2. **Video links in assistant answers are not built.**
-3. **Online manual discovery was not tried with a real search and a real
-   model together.** It passes with a fixture search and a scripted model.
-4. **One end-to-end test did not run** (the PWA test behind nginx).
-5. **A few touch controls are still under 44 px** on Settings screens and the
-   label start grid.
-6. **Hosted sign-up is design only**, as the specification allows.
-7. **Two backend tests fail**, as they did before this work
+3. **Hosted sign-up is design only**, as the specification allows.
+4. **Two backend tests fail**, as they did before this work
    (`tests/test_actual_inventory.py`).
-8. **Two interactions of the Design D mock are not built:** numbered pins on
-   the review photo, and correcting a finding by typing in the bottom bar. See
-   "Where the app differs from the Design D mock".
+5. **Positions on photos and real manual search were each tried with one
+   model** (`openai/gpt-6-luna`) and, for search, one search service (Brave).
+6. **430 px was not checked on its own**, and empty, large, loading and error
+   states were not walked through one by one. They are covered where the
+   end-to-end files cover them.
+
+Closed by the correction batch: the two missing Design D interactions, the
+PWA test behind nginx, the real search check, and the touch controls under
+44 px.
 
 ## Judgement
 
