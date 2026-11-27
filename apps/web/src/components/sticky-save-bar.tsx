@@ -35,16 +35,19 @@ export function StickySaveBar({
       aria-label="Unsaved changes"
       data-testid="sticky-save-bar"
       className={cn(
-        "glass sticky z-30 mt-6 flex items-center justify-between gap-3 rounded-2xl border border-border/70 px-4 py-2.5 shadow-lg [[data-keyboard-tiny]_&]:static",
+        "glass sticky z-30 mt-6 flex items-center justify-between gap-3 rounded-2xl border border-border/70 px-4 py-2.5 shadow-lg [[data-keyboard-tiny]:not([data-keyboard-side])_&]:static",
         "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px)+0.5rem)]",
+        // A phone held sideways with the keyboard open: Save alone, small, at the right
+        // end of the strip. Discard returns when the keyboard closes.
+        "[[data-keyboard-side]_&]:bottom-[calc(var(--keyboard-inset,0px)+0.5rem)] [[data-keyboard-side]_&]:ml-auto [[data-keyboard-side]_&]:w-fit [[data-keyboard-side]_&]:p-1",
         className,
       )}
     >
-      <p role="status" className="min-w-0 truncate text-2xs text-muted-foreground">
+      <p role="status" className="min-w-0 truncate text-2xs text-muted-foreground [[data-keyboard-side]_&]:sr-only">
         {statusText}
       </p>
       <div className="flex shrink-0 items-center gap-2">
-        <Button type="button" size="sm" variant="ghost" className="h-11" disabled={saving} onClick={onDiscard}>
+        <Button type="button" size="sm" variant="ghost" className="h-11 [[data-keyboard-side]_&]:hidden" disabled={saving} onClick={onDiscard}>
           <Undo2 />
           Discard
         </Button>

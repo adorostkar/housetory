@@ -200,9 +200,14 @@ Visa 112.85
   await bitLine.getByLabel("Destination room").selectOption(room.id);
   await bitLine.getByLabel("Optional container").selectOption(box.id);
 
-  // The corrections of a line are kept by themselves: no Skip, no Apply. The line
-  // still waits, and a reload shows it as it was corrected.
-  const reviewUrl = `/api/v1/documents/${page.url().split("/").pop()}/extraction`;
+  // The fields at the top of the review are corrected too.
+  await page.getByLabel(/^Merchant/).fill("Corner Hardware");
+  await page.getByLabel(/^Order or invoice number/).fill(`ORD-${suffix}`);
+
+  // The corrections of a line and of the fields at the top are kept by themselves:
+  // no Skip, no Apply. The line still waits, and a reload shows all of it again.
+  const reviewedId = page.url().split("/").pop();
+  const reviewUrl = `/api/v1/documents/${reviewedId}/extraction`;
   await expect
     .poll(async () => {
       const review = (await (await request.get(reviewUrl)).json()) as {
@@ -211,12 +216,16 @@ Visa 112.85
           status: string;
           draft?: { newItem?: { roomId?: string; locationId?: string } } | null;
         }>;
+        header_draft?: { draft: { merchant?: string; order_number?: string } } | null;
       };
       const line = review.lines.find((entry) => entry.description === `Drill Bit Set ${suffix}`);
       const state = line ? review.line_states?.[line.id] : undefined;
-      return [state?.status, state?.draft?.newItem?.roomId, state?.draft?.newItem?.locationId];
+      return [
+        state?.status, state?.draft?.newItem?.roomId, state?.draft?.newItem?.locationId,
+        review.header_draft?.draft.merchant, review.header_draft?.draft.order_number,
+      ];
     })
-    .toEqual(["pending", room.id, box.id]);
+    .toEqual(["pending", room.id, box.id, "Corner Hardware", `ORD-${suffix}`]);
   await page.reload();
   await page.getByRole("button", { name: "Review extraction" }).click({ timeout: 30_000 });
   await expect(bitLine.getByRole("checkbox")).not.toBeChecked();
@@ -225,9 +234,15 @@ Visa 112.85
   await expect(bitLine.getByLabel("Destination room")).toHaveValue(room.id);
   await expect(bitLine.getByLabel("Optional container")).toHaveValue(box.id);
   expect((await (await request.get(`/api/v1/items?room_id=${room.id}`)).json()).total).toBe(1);
+  // The fields at the top are filled again. Filling them applied nothing: the
+  // document itself is as it was read, with no items and no purchase.
+  await expect(page.getByLabel(/^Merchant/)).toHaveValue("Corner Hardware");
+  await expect(page.getByLabel(/^Order or invoice number/)).toHaveValue(`ORD-${suffix}`);
+  const waiting = await (await request.get(`/api/v1/documents/${reviewedId}`)).json();
+  expect(waiting.merchant).not.toBe("Corner Hardware");
+  expect(waiting.items).toHaveLength(0);
+  expect(waiting.extracted_metadata?.extraction_applied).toBeUndefined();
 
-  // The fields of the document itself are not rows. They are entered before applying.
-  await page.getByLabel(/^Merchant/).fill("Corner Hardware");
   await page.getByRole("button", { name: "Select all" }).click();
   await page.getByRole("button", { name: /^Apply: add 1 item, link 1 item/ }).click();
 

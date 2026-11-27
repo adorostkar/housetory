@@ -1,4 +1,5 @@
 import { clearAllRecentItems } from "@/lib/recent-items";
+import { clearAllReviewDrafts } from "@/lib/review-draft-store";
 
 const DRAFT_PREFIX = "housetory:item-draft:v1:";
 
@@ -214,5 +215,7 @@ export function clearAllItemDrafts(): void {
     // Nothing to clear when storage is unavailable.
   }
   clearAllRecentItems();
+  // Review corrections that the server never confirmed are private in the same way.
+  clearAllReviewDrafts();
   window.dispatchEvent(new Event(ITEM_DRAFTS_CLEARED_EVENT));
 }

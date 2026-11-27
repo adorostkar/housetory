@@ -161,6 +161,7 @@ function reviewRun(overrides: Partial<ReviewRun> = {}): ReviewRun {
 }
 
 let canWrite = true;
+let signedIn = false;
 let owner = true;
 let suggestions = [categorySuggestion, duplicateSuggestion];
 
@@ -174,7 +175,11 @@ vi.mock("@/lib/queries", async (importOriginal) => {
     ...actual,
     useCanWrite: () => canWrite,
     useSession: () => ({
-      data: { role: owner ? "owner" : "member" },
+      data: {
+        role: owner ? "owner" : "member",
+        // Without a signed-in user there is no copy of an edit on this device.
+        ...(signedIn ? { user: { id: "user-1" }, household: { id: "house-1" } } : {}),
+      },
       isPending: false,
     }),
     useAiStatus: () => ({
@@ -364,6 +369,8 @@ function originFromHref(href: string) {
 beforeEach(() => {
   canWrite = true;
   owner = true;
+  signedIn = false;
+  localStorage.clear();
   suggestions = [categorySuggestion, duplicateSuggestion];
   summary.last_run = null;
   summary.unfinished_runs = [];
@@ -747,6 +754,92 @@ describe("ReviewPage", () => {
       await pass(5000);
       expect(drafts()).toHaveLength(2);
       expect(screen.queryByText(note)).not.toBeInTheDocument();
+    });
+
+    it("is shown again after a reload when its request was lost, is sent again, and applies nothing", async () => {
+      signedIn = true;
+      const copy = "housetory:review-draft:v1:user-1:house-1:inventory:suggestions:suggestion-name";
+      vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+      load();
+      keep("Cordless drill 18V");
+      // The copy is on this device before anything is sent.
+      expect(drafts()).toHaveLength(0);
+      expect(JSON.parse(localStorage.getItem(copy)!)).toEqual(
+        expect.objectContaining({ path: draftPath, body: { draft: { name: "Cordless drill 18V" } } }),
+      );
+      await pass(600);
+      expect(drafts()).toHaveLength(1);
+      expect(localStorage.getItem(copy)).not.toBeNull();
+
+      // A reload: the server never got the edit, so its list has the row without it.
+      cleanup();
+      vi.useRealTimers();
+      vi.mocked(api.put).mockClear();
+      suggestions = [nameSuggestion];
+      renderPage();
+      expect(within(card()).getByText("Cordless drill 18V").closest("li")).toHaveTextContent("Your edit: Cordless drill 18V");
+      // The suggestion still waits. Putting the edit back applied and skipped nothing.
+      expect(within(card()).getByRole("button", { name: "Apply change" })).toBeEnabled();
+      expect(api.post).not.toHaveBeenCalled();
+      // It is sent again by itself. When the server has it, the copy is gone.
+      await waitFor(() => expect(drafts()).toEqual(
+        [[draftPath, expect.objectContaining({ draft: { name: "Cordless drill 18V" } }), undefined]],
+      ), { timeout: 3000 });
+      await waitFor(() => expect(localStorage.getItem(copy)).toBeNull());
+      expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("is dropped when the server has a newer edit from another device, and nothing is sent", async () => {
+      signedIn = true;
+      const copy = "housetory:review-draft:v1:user-1:house-1:inventory:suggestions:suggestion-name";
+      vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+      load();
+      keep("Cordless drill 18V");
+      await pass(600);
+      // The copy says what the server kept when the edit was made: nothing.
+      expect(JSON.parse(localStorage.getItem(copy)!)).toEqual(expect.objectContaining({ base: null }));
+      cleanup();
+      vi.useRealTimers();
+      vi.mocked(api.put).mockClear();
+      // Before this device is opened again, the suggestion gets another edit elsewhere.
+      suggestions = [{ ...nameSuggestion, evidence: { review_draft: { name: "Drill from the laptop" } } }];
+      renderPage();
+      expect(within(card()).getByText("Drill from the laptop").closest("li")).toHaveTextContent("Your edit: Drill from the laptop");
+      expect(within(card()).queryByText("Cordless drill 18V")).toBeNull();
+      await waitFor(() => expect(localStorage.getItem(copy)).toBeNull());
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      expect(drafts()).toHaveLength(0);
+      expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("is kept when an older edit of this browser reached the server without an answer", async () => {
+      signedIn = true;
+      const copy = "housetory:review-draft:v1:user-1:house-1:inventory:suggestions:suggestion-name";
+      // A slow link: the request reaches the server, but its answer never reaches the page.
+      vi.mocked(api.put).mockImplementationOnce(() => new Promise(() => undefined));
+      load();
+      keep("Cordless drill 18V");
+      await pass(600);
+      expect(drafts()).toHaveLength(1);
+      // The person changes the edit again. The tab dies before that is sent.
+      keep("Cordless drill 20V");
+      expect(JSON.parse(localStorage.getItem(copy)!)).toEqual(expect.objectContaining({
+        body: { draft: { name: "Cordless drill 20V" } }, base: null, sent: [{ draft: { name: "Cordless drill 18V" } }],
+      }));
+      vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+      cleanup();
+      vi.useRealTimers();
+      vi.mocked(api.put).mockClear();
+      // The review is opened again. The server keeps the first edit, which this
+      // browser sent itself, so the newer one is still good: it is shown and sent.
+      suggestions = [{ ...nameSuggestion, evidence: { review_draft: { name: "Cordless drill 18V" } } }];
+      renderPage();
+      expect(within(card()).getByText("Cordless drill 20V").closest("li")).toHaveTextContent("Your edit: Cordless drill 20V");
+      await waitFor(() => expect(drafts()).toEqual(
+        [[draftPath, expect.objectContaining({ draft: { name: "Cordless drill 20V" } }), undefined]],
+      ), { timeout: 3000 });
+      await waitFor(() => expect(localStorage.getItem(copy)).toBeNull());
+      expect(api.post).not.toHaveBeenCalled();
     });
 
     it("goes with Apply and with the bulk action, and a waiting save does no harm", async () => {

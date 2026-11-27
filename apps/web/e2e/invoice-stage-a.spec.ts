@@ -115,6 +115,11 @@ async function fixtureApp(page: Page) {
   const calls: string[] = [];
   const pageErrors: string[] = [];
   const operations: Array<"interpret" | "matches"> = [];
+  // The fields at the top of a review are kept as a draft on the server. Each request
+  // carries the whole set, or null when they are the first reading again.
+  type HeaderDraft = { version: string; draft: Record<string, string | null> | null };
+  const headerDrafts: HeaderDraft[] = [];
+  let keptHeader: HeaderDraft | null = null;
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const state: {
     stage: DocumentProcessing["stage"];
@@ -278,11 +283,19 @@ async function fixtureApp(page: Page) {
         },
       });
     }
-    if (url.pathname === `${root}/extraction`) {
+    if (url.pathname === `${root}/extraction/draft` && method === "PUT") {
+      const body = request.postDataJSON() as HeaderDraft;
+      headerDrafts.push(body);
+      keptHeader = body.draft ? body : null;
+    }
+    // Keeping the draft answers with the review, like reading it.
+    if (url.pathname === `${root}/extraction` ||
+        (url.pathname === `${root}/extraction/draft` && method === "PUT")) {
       const ready = state.enhancementStatus === "ready";
       return route.fulfill({
         json: {
           ...extraction,
+          header_draft: keptHeader,
           matches: state.includeCandidates ? [{
             line_id: extraction.lines[0]!.id,
             candidates,
@@ -359,7 +372,7 @@ async function fixtureApp(page: Page) {
       json: { detail: { code: "unmocked_fixture", message: "Unexpected fixture request." } },
     });
   });
-  return { state, calls, unexpected, pageErrors, operations };
+  return { state, calls, unexpected, pageErrors, operations, headerDrafts };
 }
 
 async function screenshot(page: Page, name: string) {
@@ -483,7 +496,7 @@ for (const [operation, label] of [
   ["matches", "Re-rank matches"],
 ] as const) {
   test(`queues bounded ${operation} review without replacing manual edits or allowing duplicate work`, async ({ page }) => {
-    const { state, calls, unexpected, pageErrors, operations } = await fixtureApp(page);
+    const { state, calls, unexpected, pageErrors, operations, headerDrafts } = await fixtureApp(page);
     state.stage = "ready";
     state.enhancementStatus = "off";
     state.includeCandidates = true;
@@ -526,6 +539,12 @@ for (const [operation, label] of [
       `POST /api/v1/documents/${documentId}/processing/retry`,
     ]);
     expect(calls.filter((call) => call.includes("/extraction/refine") || call.includes("/extraction/matches"))).toEqual([]);
+    // The corrected merchant is kept as a draft of the review. That is the only other
+    // write, and it applies nothing.
+    await expect.poll(() => headerDrafts.at(-1)?.draft?.merchant).toBe("Keep my reviewed merchant");
+    expect([...new Set(calls.filter((call) => call.startsWith("PUT")))]).toEqual([
+      `PUT /api/v1/documents/${documentId}/extraction/draft`,
+    ]);
     expect(unexpected).toEqual([]);
     expect(pageErrors).toEqual([]);
   });
@@ -547,7 +566,7 @@ async function sendDocumentThroughAssistant(page: Page) {
 }
 
 test("assistant document review preserves manual edits across the sheet and its full-height view", async ({ page }) => {
-  const { calls, unexpected, pageErrors } = await fixtureApp(page);
+  const { calls, unexpected, pageErrors, headerDrafts } = await fixtureApp(page);
   await page.setViewportSize({ width: 390, height: 900 });
   const dialog = await sendDocumentThroughAssistant(page);
   await dialog.getByRole("region", { name: "Document processing" })
@@ -563,9 +582,14 @@ test("assistant document review preserves manual edits across the sheet and its 
   await dialog.getByRole("button", { name: "Make the assistant full height" }).click();
   await expect(dialog.getByRole("button", { name: "Make the assistant smaller" })).toBeVisible();
   await expect(dialog.getByLabel(/^Merchant/)).toHaveValue("Keep this draft");
-  // Sending the file is the only write. Editing the draft saves nothing.
+  // Sending the file is the only thing that was created or changed. The corrected
+  // merchant is kept as a draft of the review, which applies nothing.
   expect(calls.filter((call) => call.startsWith("POST") || call.startsWith("PATCH")))
     .toEqual(["POST /api/v1/documents"]);
+  await expect.poll(() => headerDrafts.at(-1)?.draft?.merchant).toBe("Keep this draft");
+  expect([...new Set(calls.filter((call) => call.startsWith("PUT")))]).toEqual([
+    `PUT /api/v1/documents/${documentId}/extraction/draft`,
+  ]);
   expect(unexpected).toEqual([]);
   expect(pageErrors).toEqual([]);
 });

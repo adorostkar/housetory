@@ -63,8 +63,10 @@ const DialogContent = React.forwardRef<
       />
       {children}
       {!hideClose && (
-        <div className="max-sm:pointer-events-none max-sm:sticky max-sm:top-3 max-sm:z-20 max-sm:order-first max-sm:-mb-5 max-sm:h-0 max-sm:shrink-0 sm:contents">
-          <DialogPrimitive.Close className="pointer-events-auto absolute -right-2 top-0 flex size-9 items-center justify-center rounded-full text-muted-foreground max-sm:-right-3 max-sm:-top-1 max-sm:size-11 coarse:-right-3 coarse:-top-1 coarse:size-11 opacity-70 transition-colors hover:bg-secondary hover:text-foreground hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:right-4 sm:top-4">
+        // With a touch keyboard open a centred dialog is short and scrolls. Close then stays
+        // at the top of what is seen, as it does in a phone sheet.
+        <div className="max-sm:pointer-events-none max-sm:sticky max-sm:top-3 max-sm:z-20 max-sm:order-first max-sm:-mb-5 max-sm:h-0 max-sm:shrink-0 sm:contents sm:[[data-keyboard]_&]:pointer-events-none sm:[[data-keyboard]_&]:sticky sm:[[data-keyboard]_&]:top-4 sm:[[data-keyboard]_&]:z-20 sm:[[data-keyboard]_&]:order-first sm:[[data-keyboard]_&]:-mb-5 sm:[[data-keyboard]_&]:block sm:[[data-keyboard]_&]:h-0">
+          <DialogPrimitive.Close className="pointer-events-auto absolute -right-2 top-0 flex size-9 items-center justify-center rounded-full text-muted-foreground max-sm:-right-3 max-sm:-top-1 max-sm:size-11 coarse:-right-3 coarse:-top-1 coarse:size-11 opacity-70 transition-colors hover:bg-secondary hover:text-foreground hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:right-4 sm:top-4 sm:[[data-keyboard]_&]:-right-3 sm:[[data-keyboard]_&]:-top-3 sm:[[data-keyboard]_&]:bg-popover/90 sm:[[data-keyboard]_&]:opacity-100">
             <X className="size-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>

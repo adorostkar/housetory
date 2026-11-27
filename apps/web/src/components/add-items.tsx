@@ -249,7 +249,7 @@ function AddItemsOverlay({
       >
         {/* On a small phone the keyboard leaves the sheet little height. The heading
             then moves away with the sheet, so it does not lie on the text box. */}
-        <SheetHeader className="pr-12 [[data-keyboard=short]_&]:static">
+        <SheetHeader className="pr-12 [[data-keyboard=short]_&]:static [[data-keyboard-side]_&]:sr-only">
           <SheetTitle ref={titleRef} tabIndex={-1} className="focus:outline-none">
             Add items
           </SheetTitle>

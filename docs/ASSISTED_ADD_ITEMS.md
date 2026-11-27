@@ -74,6 +74,40 @@ page keeps showing what was typed there; after a reload the server's draft is
 shown. A row that was added, skipped or rejected answers 409 and keeps nothing.
 An empty request puts the row back as it was read.
 
+A browser can lose a request that is sent while a page closes or reloads.
+Safari does this more often than others. So each correction is first written
+to this device (`localStorage`), at once, before it is sent. The key is
+`housetory:review-draft:v1:<user>:<household>:<kind>:<review id>:<row>`. The
+copy is removed when the server has confirmed that same correction, when the
+row was added or skipped, when the server says the row is gone or decided, on
+sign-out, and after fourteen days (for every account on the device).
+
+A copy can also stay behind when the request did arrive but the page was gone
+before the answer. So the copy also says what the server had for the row when
+the correction was made. When a review opens, it compares each copy with the
+row on the server:
+
+- The server still has what it had then, or it has a correction that this
+  browser sent itself and never got an answer for: nobody else changed the
+  row. The copy is shown in its row and sent again. The row still waits:
+  nothing is added. (The copy remembers the last few corrections it sent
+  without an answer, and what the server confirmed last.)
+- The server has something else, a newer correction from another device:
+  **the server wins**. Its value is shown and the copy is removed. Nothing
+  is sent.
+
+Without the review on screen there is no row to compare with. Then only a copy
+of the **last ten minutes** is sent again by itself (a reload, a quick
+navigation), when the app starts and when the connection returns. An older copy
+waits until its review is opened and is checked there. A copy is read again
+just before it is sent, so an older request that still waits cannot go over a
+newer correction that was saved since. A copy is never sent while another
+household is selected, and it stays when the server says so. While a save
+fails the page keeps the correction, shows one quiet line and tries again. If
+the session ended, the copy stays for the same person. A copy the server can
+never keep is removed, and the app says so once. The copy is on this device
+only: another browser does not have it, and clearing site data removes it.
+
 The server keeps the first reading of a corrected row beside the correction.
 Optional AI suggestions are made for that first reading, so a kept correction
 does not make them out of date: they stay ready, a job that is still running is

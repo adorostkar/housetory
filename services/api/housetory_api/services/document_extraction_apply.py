@@ -111,6 +111,10 @@ SKIPS_KEY = "extraction_line_skips"
 # The lines applied so far, kept with the document so that lists of documents can
 # tell an unfinished review from a finished one without reading every apply.
 APPLIED_LINES_KEY = "extraction_applied_lines"
+# The corrected fields at the top of a review that still waits (merchant, dates,
+# currency, total, order number). It is not part of the extraction itself, so it
+# does not change the extraction version and does not make AI suggestions stale.
+HEADER_DRAFT_KEY = "extraction_header_draft"
 
 
 def _marker_waits(marker: dict[str, Any]) -> bool:
@@ -346,6 +350,75 @@ def save_line_draft(
     else:
         skips.pop(line_id, None)
     metadata[SKIPS_KEY] = skips
+    document.extracted_metadata = metadata
+    db.commit()
+    return get_document(db, household_id, document.id)
+
+
+def _review_finished(metadata: dict[str, Any]) -> bool:
+    """True when the document was applied and no product line still waits."""
+    return bool(metadata.get("extraction_applied")) and not has_pending_lines(metadata)
+
+
+def header_draft(document: Document) -> dict[str, Any] | None:
+    """The kept fields at the top of the review, with the version they belong to.
+
+    A finished review has none to show, also when its last line was skipped rather
+    than applied. They are still stored then, so that they are back when a skipped
+    line is restored and the review waits again.
+    """
+    metadata = document.extracted_metadata or {}
+    stored = metadata.get(HEADER_DRAFT_KEY)
+    if (
+        _review_finished(metadata)
+        or not isinstance(stored, dict)
+        or not isinstance(stored.get("draft"), dict)
+        or not isinstance(stored.get("version"), str)
+    ):
+        return None
+    return {"version": stored["version"], "draft": stored["draft"]}
+
+
+def save_header_draft(
+    db: Session,
+    household_id: uuid.UUID,
+    document: Document,
+    *,
+    version: str,
+    draft: dict[str, Any] | None,
+    actor_user_id: uuid.UUID | None,
+) -> Document:
+    """Keep the corrected fields at the top of a review that still waits.
+
+    Nothing is applied: no purchase is recorded and the document itself is not
+    changed. Without a draft the kept one is removed, so the first reading is shown
+    again. The last write wins.
+    """
+    document = db.scalar(
+        select(Document)
+        .where(Document.id == document.id, Document.household_id == household_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if document is None:
+        raise ApiError(404, "document_not_found", "Document not found.")
+    metadata = dict(document.extracted_metadata or {})
+    if _review_finished(metadata):
+        raise ApiError(
+            409,
+            "extraction_applied",
+            "This document was already applied. Its corrections were not kept.",
+        )
+    values = {key: value for key, value in (draft or {}).items() if value is not None}
+    if values:
+        metadata[HEADER_DRAFT_KEY] = {
+            "version": version,
+            "draft": values,
+            "at": datetime.now(UTC).isoformat(),
+            "actor_user_id": str(actor_user_id) if actor_user_id else None,
+        }
+    else:
+        metadata.pop(HEADER_DRAFT_KEY, None)
     document.extracted_metadata = metadata
     db.commit()
     return get_document(db, household_id, document.id)
@@ -1033,6 +1106,10 @@ def apply_extraction(
             for applied_line in applied_lines:
                 skips.pop(str(applied_line["line_id"]), None)
             metadata[SKIPS_KEY] = skips
+        # The corrected fields stay while a line still waits, so that the rest of
+        # the review is applied with the same details. A finished review needs none.
+        if _review_finished(metadata):
+            metadata.pop(HEADER_DRAFT_KEY, None)
         document.extracted_metadata = metadata
         db.commit()
     except IntegrityError as exc:

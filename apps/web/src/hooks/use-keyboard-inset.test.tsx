@@ -9,7 +9,7 @@ function Probe() {
 }
 
 /** A stand-in for the phone's visual viewport. The numbers are the ones iOS gave in the Simulator. */
-function viewport(values: { height: number; offsetTop: number; scale?: number }) {
+function viewport(values: { height: number; offsetTop: number; scale?: number; width?: number }) {
   const target = new EventTarget();
   return Object.assign(target, { scale: 1, ...values }) as unknown as VisualViewport;
 }
@@ -29,7 +29,7 @@ describe("useKeyboardInset", () => {
     Object.defineProperty(root, "clientHeight", { configurable: true, value: 0 });
   });
 
-  function show(inner: number, layout: number, visual: { height: number; offsetTop: number; scale?: number }) {
+  function show(inner: number, layout: number, visual: { height: number; offsetTop: number; scale?: number; width?: number }) {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: inner });
     Object.defineProperty(root, "clientHeight", { configurable: true, value: layout });
     vi.stubGlobal("visualViewport", viewport(visual));
@@ -69,6 +69,46 @@ describe("useKeyboardInset", () => {
     show(699, 699, { height: 350, offsetTop: 100, scale: 2 });
     expect(read("--keyboard-inset")).toBe("0px");
     expect(read("--visual-viewport-top")).toBe("0px");
+  });
+
+  it("marks a strip of a phone held sideways, where things stand beside the field", () => {
+    // Android phone on its side: 914 wide, the keyboard leaves 70 px.
+    const view = show(331, 331, { height: 70, offsetTop: 0, width: 914 });
+    expect(root.dataset.keyboardTiny).toBe("");
+    expect(root.dataset.keyboardSide).toBe("");
+    act(() => view.unmount());
+    expect(root.dataset.keyboardSide).toBeUndefined();
+  });
+
+  it("does not mark a small upright phone as sideways", () => {
+    show(560, 560, { height: 197, offsetTop: 0, width: 360 });
+    expect(root.dataset.keyboardTiny).toBe("");
+    expect(root.dataset.keyboardSide).toBeUndefined();
+  });
+
+  it("keeps the focus in the field for a tap on a button in a sideways strip, so the button does not move away", () => {
+    const tap = (target: Element) => {
+      const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const field = document.body.appendChild(document.createElement("input"));
+    const button = document.body.appendChild(document.createElement("button"));
+    try {
+      const view = show(331, 331, { height: 70, offsetTop: 0, width: 914 });
+      field.focus();
+      expect(tap(button)).toBe(true);
+      // A tap into a field must still move the caret there.
+      expect(tap(field)).toBe(false);
+      act(() => view.unmount());
+      // An upright phone: nothing moves under the finger, so the tap is left alone.
+      show(699, 699, { height: 369, offsetTop: 0, width: 390 });
+      field.focus();
+      expect(tap(button)).toBe(false);
+    } finally {
+      field.remove();
+      button.remove();
+    }
   });
 
   it("removes its values when it goes away", () => {

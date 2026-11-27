@@ -3,6 +3,8 @@ import * as React from "react";
 import { isTextEntry } from "@/hooks/use-software-keyboard-open";
 
 const GAP = 12;
+/** How much of a tall field is shown in a strip of some 70 px: its first two lines. */
+const TINY_FIELD_ROOM = 52;
 
 /**
  * With the phone keyboard open, keeps the field that is being typed in on the
@@ -33,18 +35,35 @@ export function useKeepFocusedFieldVisible(keyboardOpen: boolean): void {
       const rect = field.getBoundingClientRect();
       // A bar that lies over the page at the lower edge takes that room away.
       const x = Math.min(window.innerWidth - 2, Math.max(2, rect.left + rect.width / 2));
-      let cover = document.elementFromPoint(x, bottom - 4);
-      while (cover && cover !== document.body) {
-        const position = window.getComputedStyle(cover).position;
-        if ((position === "sticky" || position === "fixed") && !cover.contains(field)) {
-          bottom = Math.min(bottom, cover.getBoundingClientRect().top);
-          break;
+      // Such a bar does not always stand on the lower edge itself (a Save bar in a
+      // side panel can stand a little above it), so a few heights are tried.
+      const edge = bottom;
+      findCover: for (let up = 4; up <= 148; up += 24) {
+        let cover = document.elementFromPoint(x, edge - up);
+        while (cover && cover !== document.body) {
+          const position = window.getComputedStyle(cover).position;
+          if ((position === "sticky" || position === "fixed") && !cover.contains(field)) {
+            const coverTop = cover.getBoundingClientRect().top;
+            // Only a bar in the lower part of what is seen takes room from below.
+            if (coverTop > top + (edge - top) / 2) bottom = Math.min(bottom, coverTop);
+            break findCover;
+          }
+          cover = cover.parentElement;
         }
-        cover = cover.parentElement;
       }
       const room = bottom - top - GAP * 2;
       let delta = 0;
-      if (rect.height > room || rect.top < top + GAP) delta = rect.top - (top + GAP);
+      // A strip of some 70 px (a phone held sideways): the field stands on the lower edge
+      // of the strip, and a tall field shows its first lines there. The upper edge is not
+      // safe: Safari lays its address bar over the top of what it reports as seen.
+      if (document.documentElement.dataset.keyboardTiny !== undefined) {
+        // A field in a part that is fixed to the screen (the bar editor) places itself.
+        for (let part: HTMLElement | null = field; part && part !== document.body; part = part.parentElement) {
+          if (window.getComputedStyle(part).position === "fixed") return;
+        }
+        delta = rect.top - (bottom - 4 - Math.min(rect.height, TINY_FIELD_ROOM));
+      }
+      else if (rect.height > room || rect.top < top + GAP) delta = rect.top - (top + GAP);
       else if (rect.bottom > bottom - GAP) delta = rect.bottom - (bottom - GAP);
       if (Math.abs(delta) <= 1) return;
       // The field may live in a part that scrolls by itself (the item panel beside the list).

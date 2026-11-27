@@ -92,7 +92,12 @@ and the history are not changed. A reload shows the row with **Your edit**,
 and **Apply change** and the bulk action apply that edit. An empty draft
 forgets the edit. A suggestion that no longer waits answers 409 and keeps
 nothing. If a save fails, the page keeps the edit, shows one quiet line and
-tries again.
+tries again. The edit is also written to this device first and removed when
+the server has confirmed it, so a request that is lost while the page closes
+does not lose the edit: after a reload the row shows it again and it is sent
+again, if the server still keeps what it kept when the edit was made. If the
+server has a newer edit, the server wins. Nothing is applied by that. See
+[Assisted add items](ASSISTED_ADD_ITEMS.md) for the rules of that copy.
 Bulk accept applies only compatible pending category/name/organisation suggestions and
 reports applied/skipped/stale/unsupported outcomes. The `organisation` queue type and
 `apply_organisation` action are additive; existing category/name rows and actions remain

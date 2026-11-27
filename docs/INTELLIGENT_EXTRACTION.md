@@ -137,9 +137,31 @@ still waits and nothing is applied. A reload shows the line as it was
 corrected; a place that was kept wins over the place chosen at capture. An
 empty request forgets the draft. A line that was applied or skipped answers
 409 and keeps nothing. If a save fails, the review keeps what was typed, shows
-one quiet line and tries again. The fields of the document itself (merchant,
-dates, total, purchase choice) are not lines: they are not kept this way and
-are entered before applying.
+one quiet line and tries again.
+
+The fields at the top of the review are kept the same way, as one draft:
+merchant, purchase date, document date, currency, total, order number, and
+whether a purchase is created (`PUT /documents/{id}/extraction/draft`, with the
+extraction version they belong to). `GET /documents/{id}/extraction` gives them
+back as `header_draft`, and the review starts from them when they are for the
+version on screen. Putting them back only fills the fields: nothing is applied,
+no purchase is recorded and the document is not changed. They are text as it
+was typed, so a half-typed date or amount comes back too. An empty draft puts
+the first reading back. The draft is not part of the extraction, so it does not
+change its version and does not make AI suggestions out of date. It stays while
+a line still waits, so that the rest is applied with the same details. A
+finished review, with every line applied or skipped, shows none, and a late one
+then answers 409. It is removed for good when the last line is applied. When
+the last line was skipped instead, it is back if that line is restored.
+A choice of an existing purchase is not kept: it depends on the matched items.
+
+Each correction of a line or of these fields is also written to this device
+first, and removed when the server has confirmed it. A request that is lost
+while the page closes (Safari does this) is then not a lost correction: after a
+reload the review shows it again and sends it again, if the server still has
+what it had when the correction was made. If the server has something newer
+for that line or for the fields, the server wins and the copy is removed. See
+[Assisted add items](ASSISTED_ADD_ITEMS.md) for the rules of that copy.
 
 Stock rules:
 

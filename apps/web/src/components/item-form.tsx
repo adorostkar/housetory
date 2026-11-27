@@ -617,7 +617,13 @@ function ItemFormFields(props: ItemFormProps) {
 
   return (
     <>
-      <form onSubmit={submit} className="space-y-5" noValidate>
+      {/* A phone held sideways with the keyboard open: the fields leave the right part of
+          the strip free, and Save stands there, beside the field that is typed in. */}
+      <form
+        onSubmit={submit}
+        className={cn("space-y-5", presentation !== "panel" && "[[data-keyboard-side]_&]:pr-[12.5rem]")}
+        noValidate
+      >
         {generalError && <FormError message={generalError} />}
         {protection.draftOffer && (
           <ItemDraftBanner
@@ -1288,19 +1294,22 @@ function ItemFormFields(props: ItemFormProps) {
           data-testid="item-form-footer"
           className={cn(
             "sticky z-20 -mx-1 flex items-center justify-end gap-3 border-t border-border/70 bg-background/95 px-1 py-3 backdrop-blur-xl",
-            // A phone held sideways with the keyboard open: the footer would cover the field.
-            "[[data-keyboard-tiny]_&]:static",
-            // In the side panel (a tablet held sideways) the footer does not stick while a
-            // touch keyboard is open. The panel is short then, and the footer would lie
-            // on the field that is typed in. It sticks again when the keyboard closes.
+            // A small phone with the keyboard open: the footer would cover the field.
+            "[[data-keyboard-tiny]:not([data-keyboard-side])_&]:static",
             presentation === "panel"
-              ? "bottom-0 [[data-keyboard]_&]:static"
-              : "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px))]",
+              ? "bottom-0"
+              : cn(
+                  "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px))]",
+                  // A phone held sideways with the keyboard open: Save alone, beside the
+                  // field that is typed in. The page leaves that part of the strip free.
+                  "[[data-keyboard-side]_&]:bottom-[calc(var(--keyboard-inset,0px)+0.75rem)] [[data-keyboard-side]_&]:ml-auto [[data-keyboard-side]_&]:mr-[-12.5rem] [[data-keyboard-side]_&]:w-fit [[data-keyboard-side]_&]:border-0 [[data-keyboard-side]_&]:bg-transparent [[data-keyboard-side]_&]:p-0 [[data-keyboard-side]_&]:backdrop-blur-none",
+                ),
           )}
         >
           <Button
             type="button"
             variant="ghost"
+            className={presentation === "panel" ? undefined : "[[data-keyboard-side]_&]:hidden"}
             onClick={() => {
               protection.discardChanges();
               navigate(
@@ -1315,7 +1324,7 @@ function ItemFormFields(props: ItemFormProps) {
           <Button
             type="submit"
             size="lg"
-            className="min-w-0"
+            className={cn("min-w-0", presentation !== "panel" && "[[data-keyboard-side]_&]:h-11 [[data-keyboard-side]_&]:max-w-[11.5rem] [[data-keyboard-side]_&]:px-4 [[data-keyboard-side]_&]:shadow-lift")}
             disabled={
               save.isPending ||
               !name.trim() ||

@@ -1575,3 +1575,157 @@ def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
     assert done.json()["detail"]["code"] == "extraction_line_applied"
     assert states() == final
     assert ladder["id"] not in final
+
+
+def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client):
+    from housetory_api.services.enrichment import source_version
+
+    room = create_room(owner_client)
+    document = upload_document(owner_client, THREE_LINE_RECEIPT)
+    extraction = ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT).json()
+    ladder, roller, lamp = [line for line in extraction["lines"] if line["kind"] == "product"]
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+    draft_url = f"{review_url}/draft"
+    version = extraction["version"]
+    assert extraction["header_draft"] is None
+
+    def stored_version():
+        with SessionLocal() as db:
+            return source_version(db, db.get(Document, uuid.UUID(document["id"])))
+
+    def record():
+        return owner_client.get(f"/api/v1/documents/{document['id']}").json()
+
+    def kept_header(response):
+        # The answer names every field; the ones that were not sent are empty.
+        stored = response.json()["header_draft"]
+        return stored and (
+            stored["version"],
+            {key: value for key, value in stored["draft"].items() if value is not None},
+        )
+
+    before_version = stored_version()
+    before = record()
+    draft = {
+        "merchant": "Corner Hardware AB",
+        "purchase_date": "2026-02-1",
+        "document_date": "2026-02-15",
+        "currency": "SEK",
+        "total": "299,5",
+        "order_number": "ORD-1",
+        "purchase_action": "none",
+    }
+    first = owner_client.put(draft_url, json={"version": version, "draft": {"merchant": "First"}})
+    assert first.status_code == 200, first.text
+    # The last write wins, and the same draft twice changes nothing.
+    for _attempt in range(2):
+        saved = owner_client.put(draft_url, json={"version": version, "draft": draft})
+        assert saved.status_code == 200, saved.text
+        assert kept_header(saved) == (version, draft)
+
+    # A reload gives the fields back as they were typed, half-typed values too. The
+    # reading itself, its version, the document and the inventory are as they were.
+    assert kept_header(owner_client.get(review_url)) == (version, draft)
+    review = owner_client.get(review_url).json()
+    assert (review["version"], review["fields"]) == (version, extraction["fields"])
+    assert review["applied"] == [] and review["line_states"] == {}
+    assert stored_version() == before_version
+    after = record()
+    for key in ("merchant", "document_date", "items", "title", "document_type"):
+        assert after[key] == before[key], key
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Purchase)) == 0
+        assert db.scalar(select(func.count()).select_from(Item)) == 0
+        assert db.scalar(select(func.count()).select_from(DocumentExtractionApply)) == 0
+
+    # Who may not write, and what is not accepted. None of it changes what is stored.
+    viewer_token, _ = _add_member(owner_client, email="header-viewer@example.com", role="viewer")
+    body = {"version": version, "draft": {"merchant": "Changed by someone else"}}
+    denied = owner_client.put(draft_url, headers=_headers(viewer_token), json=body)
+    assert denied.status_code == 403
+    for bad in (
+        {"draft": draft},
+        {"version": version, "draft": {"merchant": "x" * 201}},
+        {"version": version, "draft": {"total": "9" * 41}},
+        {"version": version, "draft": {"purchase_action": "existing"}},
+        {"version": version, "draft": "not a draft"},
+    ):
+        assert owner_client.put(draft_url, json=bad).status_code == 422, bad
+    first_household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
+    second = owner_client.post(
+        "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
+    )
+    assert second.status_code == 201, second.text
+    other = {"X-Household-Id": second.json()["household"]["id"]}
+    assert owner_client.put(draft_url, headers=other, json=body).status_code == 404
+    assert owner_client.post(f"/api/v1/households/{first_household}/select").status_code == 200
+    owner_client.headers["X-Household-Id"] = first_household
+    assert kept_header(owner_client.get(review_url)) == (version, draft)
+
+    # An empty draft puts the first reading back.
+    for empty in ({"version": version}, {"version": version, "draft": {}}):
+        cleared = owner_client.put(draft_url, json=empty)
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json() == {"header_draft": None}
+        assert owner_client.get(review_url).json()["header_draft"] is None
+        again = owner_client.put(draft_url, json={"version": version, "draft": draft})
+        assert again.status_code == 200, again.text
+
+    def add(line, name):
+        response = owner_client.post(
+            f"{review_url}/apply",
+            json={
+                "request_id": str(uuid.uuid4()),
+                "extraction_version": version,
+                "purchase_action": "create",
+                "purchase": {"merchant": "Corner Hardware AB", "price_cents": 30000},
+                "lines": [
+                    {
+                        "line_id": line["id"],
+                        "action": "create",
+                        "new_item": {"name": name, "room_id": room["id"]},
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    # One of three lines is applied: the review still waits, so the corrected fields
+    # stay for the rest of it and can still be changed.
+    add(ladder, "Ladder")
+    assert kept_header(owner_client.get(review_url)) == (version, draft)
+    changed = {**draft, "order_number": "ORD-2"}
+    kept = owner_client.put(draft_url, json={"version": version, "draft": changed})
+    assert kept.status_code == 200, kept.text
+
+    # A review that is finished by skipping its last waiting line shows no kept
+    # fields, and a late draft answers 409 and keeps nothing.
+    for line in (roller, lamp):
+        assert owner_client.post(f"{review_url}/lines/{line['id']}/skip").status_code == 200
+    assert owner_client.get(review_url).json()["header_draft"] is None
+    late = owner_client.put(draft_url, json=body)
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "extraction_applied"
+    # Restore makes the review wait again. The fields are back as they were kept,
+    # and they can be changed again.
+    assert owner_client.post(f"{review_url}/lines/{lamp['id']}/restore").status_code == 200
+    assert kept_header(owner_client.get(review_url)) == (version, changed)
+    kept = owner_client.put(draft_url, json={"version": version, "draft": draft})
+    assert kept.status_code == 200, kept.text
+
+    # With every line applied or skipped the review is finished. The draft is removed
+    # for good, and a late one answers 409 and keeps nothing.
+    add(lamp, "Work lamp")
+    assert owner_client.get(review_url).json()["header_draft"] is None
+    late = owner_client.put(draft_url, json=body)
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "extraction_applied"
+    assert owner_client.get(review_url).json()["header_draft"] is None
+    with SessionLocal() as db:
+        stored = db.get(Document, uuid.UUID(document["id"])).extracted_metadata
+        assert "extraction_header_draft" not in stored
+    # Only the two applies recorded anything: one purchase with the two items.
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Purchase)) == 1
+        assert db.scalar(select(func.count()).select_from(Item)) == 2
+

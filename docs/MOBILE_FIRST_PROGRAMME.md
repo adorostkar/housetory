@@ -20,6 +20,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | — | Correction batch after the review of Phase 6 | Done (see "Correction batch record") |
 | — | Check in Mobile Safari on the iOS Simulator, and fixes | Done (see "iOS Simulator record") |
 | — | Pending corrections saved by themselves; more iOS sizes; Android; final production build | Done (see "Last round record") |
+| — | Corrections kept on the device until the server has them; document review top fields; phone and tablet on their side with the keyboard open | Done (see "Data and keyboard round record") |
 
 All phases are finished and pushed to the branch. Nothing is merged or deployed.
 What is not complete is listed plainly under "Not complete" near the end.
@@ -1031,7 +1032,9 @@ Four backend tests and one web test cover it; they fail without the fix. The
 review found nothing wrong in permissions, household checks, races with Add
 and Skip, or the retry logic.
 
-**Limits of the saving, stated plainly:**
+**Limits of the saving, stated plainly** (the Safari limit and the top fields
+of a document review were closed in the next round; see "Data and keyboard
+round record"):
 
 - A correction made less than 0.6 seconds before the browser is killed, with
   no "page is leaving" event, can be lost.
@@ -1118,6 +1121,9 @@ shapes found defects, all fixed:
   and the field that is typed in has the strip.
 
 ### Limits on small strips and wide screens (iOS and Android)
+
+Most of these were closed in the next round; see "Data and keyboard round
+record". They are kept here as they were found.
 
 - **A phone on its side with the keyboard open** shows one field and little
   else. Search results are not shown while typing. In Add items the main
@@ -1213,6 +1219,205 @@ Outside the repository, under the same `mfp-runtime` folder as before:
 `ios-sim/IOS_MATRIX.md` (every iOS device, every check line, every try) with
 pictures in `ios-sim/uitest/out-<device>/`; `android/` with the test script,
 one folder of pictures and one log per shape.
+
+## Data and keyboard round record
+
+Done on 27 Nov 2026, after the last round record. Three things were asked
+for: keep a correction even when the request that saves it is lost (Safari,
+leaving, reloading); keep the fields at the top of a document review too; and
+make Save, Close and the search results reachable on a phone or tablet held
+sideways with the keyboard open.
+
+### 1. A correction is kept on the device until the server has it
+
+A browser can lose a request that is sent while a page closes. So the app no
+longer relies on that request alone.
+
+- Each correction is written to this device first (`localStorage`), at once,
+  before anything is sent. The key names the person, the household, the
+  review and the row:
+  `housetory:review-draft:v1:<user>:<household>:<kind>:<review>:<row>`.
+- The copy is removed only when the server has confirmed that same
+  correction, when the row was added or skipped, when the server says the row
+  is gone or decided, on sign-out, and after 14 days.
+- When a review opens, each copy is put back into its row and sent again. The
+  row still **waits**: nothing is added, nothing is applied.
+- A copy can also stay behind when the request did arrive but the page was
+  gone before the answer. So the copy also says what the server had when the
+  correction was made. If the server now has something else, a newer
+  correction from another device, **the server wins**: its value is shown and
+  the copy is removed. A correction that this browser itself sent without an
+  answer does not count as "something else".
+- Without the review on screen there is no row to compare with. Then only a
+  copy of the last 10 minutes is sent again by itself (a reload, a quick
+  navigation). An older copy waits until its review is opened.
+- While saving fails the page keeps the correction, shows the line "Your
+  corrections are not saved yet. Trying again." and tries again.
+
+Read-only reviews of this change, in three passes, found seven defects before
+the commit. All were fixed, each with a test that fails without the fix: a copy
+removed when another tab changed the household; an old request going over a
+newer saved correction; a copy going over a newer correction from another
+device; a good copy dropped on a slow connection; the top fields returned
+for a finished review; copies of other accounts never removed; and the
+import page starting the next correction from an old row.
+
+### 2. The top fields of a document review
+
+Merchant, purchase date, document date, currency, total, order number and the
+choice between "no purchase" and "new purchase" are now kept like a row:
+`PUT /documents/{id}/extraction/draft`, returned as `header_draft`. No
+migration. A viewer gets 403, another household 404. It does not change the
+version of the reading, so AI suggestions stay usable. Putting the fields
+back never applies anything: no purchase is recorded and the document is not
+changed.
+
+### 3. A phone or tablet held sideways with the keyboard open
+
+A phone on its side leaves a strip of about 70 pixels. There is no room above
+the field, but there is room beside it. In that strip:
+
+| Thing | Before | Now |
+| --- | --- | --- |
+| Search results | not shown | beside the field, in one row that scrolls sideways; a tap opens the result |
+| Assistant | Close hidden | Close stands to the left of the message field |
+| Add items | main button under the keyboard | text box, main button and Close in one row |
+| Item form | Save at the end of the form | Save stands beside the field; a tap saves with the keyboard open |
+
+A tap on a button in that strip does not take the focus from the field
+first. Otherwise the keyboard would start to close, everything would move
+back, and the tap would miss its button. This was found on the Android
+emulator: the first tap on Save closed the keyboard and saved nothing.
+
+On a tablet held sideways: the Save bar of the item side panel stays in view
+and the field is kept above it, and a dialog that scrolls keeps Close at its
+top.
+
+Two things in the test tools were wrong before and were corrected:
+
+- The Android check "results are shown" passed with a list of height zero.
+  It now needs a list at least one row high.
+- On iOS each page was opened in a new Safari tab. With several tabs Safari
+  shows a tab bar that covers half of the strip. The tests now close the
+  other tabs, as a person with one tab has none.
+
+### Results
+
+**On the final code**
+
+| Check | Result |
+| --- | --- |
+| `tsc -b`, `ruff check`, `vite build` | clean |
+| `vitest run` | 87 files, 656 tests pass |
+| Backend `pytest`, fresh database | 930 tests: 927 pass, 1 skipped, 2 fail (the two old failures) |
+| End-to-end, development servers | 49 of 49; 54 of 54; 102 of 102 that can run, 1 skipped |
+| `touch-targets` | 8 of 8; 5,110 controls, none under 44 × 44 |
+| New `landscape-keyboard` spec | 4 of 4. It makes the browser report a short visible part; it has no real keyboard |
+
+One spec of another area (`invoice-stage-a`) was updated: its stand-in server
+did not know the new address for the top fields.
+
+**Production build behind nginx** (own Docker project, removed at the end;
+all images built at 17:50 CET, the web image again at 18:16 after the last
+fix; no source file changed after that)
+
+| Check | Result |
+| --- | --- |
+| 12 end-to-end files, Chromium | 64 of 64. The six that touch this work were run again on the last web image: 18 of 18 |
+| PWA and service worker checklist | all pass |
+| Leave the page at once after a correction, 50 tries | correction missing 0 of 50, in Chrome and in WebKit |
+| The same with the saving request made to fail, 20 tries | missing 0 of 20; all saved afterwards; no copy left on the device |
+| Reload at once, 50 tries, and 20 with the request failing | missing 0 of 50 and 0 of 20 |
+| Saving answers 500 for a while | the line shows; after a reload the correction and the line are both there; when saving works the line goes and the server has it |
+| Top fields of a document review | back after a reload; nothing applied; no purchase recorded |
+| Sign-out | no copy left on the device |
+
+WebKit here is Playwright's WebKit 27.2 on the Mac, not Safari on a phone.
+It did not lose the leaving request in these runs (the server had the
+correction in 50 of 50), so the Safari loss could not be shown by it. That
+is why the request was also made to fail on purpose.
+
+**iOS Safari, Simulator, production build** (iPhone 17e, iOS 27.0)
+
+| Check | Result |
+| --- | --- |
+| Correct a row, kill Safari about one second later, open the page again | the correction is in its row |
+| The server is stopped; correct a row | the correction is in its row, the line about unsaved corrections shows |
+| Kill Safari, start the server, read the server | the server does not have the correction (3 of 3) |
+| Open the page again | the correction is back in its row; then the server has it; the row still waits; nothing added (3 of 3) |
+| Change the merchant of a document review, kill Safari, open again | the merchant is back; nothing applied |
+
+The test tool cannot act faster than about one second, so "leave within 0.6
+seconds" was not tried in real Safari. The stopped server stands in for the
+lost request.
+
+**Chrome on Android, emulator, production build**
+
+| Check | Result |
+| --- | --- |
+| Leave the page 60 ms after the Enter key | correction there afterwards: 5 of 5 in each of 6 runs |
+| Saving fails | line shows; server does not have it; copy on the device |
+| Reload while saving fails | correction still in its row |
+| Saving works again | saved by itself; line gone; no copy left; row still waits |
+| Top fields of a document review | merchant and total back after a reload; nothing applied |
+| The server is stopped; correct a row; go Home; the browser is killed; server back; open again | recovered and saved: 3 of 3 |
+
+**Layout on devices, production build**
+
+| Device | Result |
+| --- | --- |
+| iPhone 17e upright, Safari | 48 of 48 (three search checks only after two items were added, so that the search word had results) |
+| iPhone 17 on its side, Safari, one tab | 45 of 45, 1 not applicable (the rail is hidden in the strip by design) |
+| iPhone 17, installed app | 11 of 11 |
+| iPad Pro 11 on its side, Safari | 43 of 43, 5 not applicable (iPad has no Done key) |
+| Android phone, small phone, phone on its side, tablet | 59 of 59 each, no limits |
+| Android tablet on its side | 57 of 58 in the full run. The one that failed (the total of a document review after a reload) was the test: it tapped a field that lay under the keyboard. It passed when the test closed the keyboard first |
+
+All limits of the last round on these shapes are closed: none of the five
+Android shapes reports a limit now, and the four iPad checks that failed
+before pass.
+
+### Limits that remain, stated plainly
+
+- **A browser that is killed with no warning** (a crash, the power going)
+  while the server cannot be reached can lose the last correction. Chrome
+  writes its local storage to disk a moment later, and at once when it goes
+  to the background. Measured on the Android emulator with the server
+  stopped: Chrome killed from the foreground lost the correction in 4 of 8
+  tries; after pressing Home first, 0 of 3. Safari on the Simulator kept it
+  in 3 of 3 kills from the foreground.
+- The copy is on **this device and this browser** only. With storage turned
+  off (some private modes) the safety is as it was before.
+- **The server wins** over a copy when another device corrected the same row
+  in the meantime. Nothing is said about it.
+- A copy older than 10 minutes is sent only when its review is opened. A copy
+  for a suggestion that is in no loaded list, or for a line of an older
+  reading of a document, waits until it is removed after 14 days.
+- The choice of an **existing** purchase in a document review is not kept.
+- The server tidies tags (it removes `#` and doubles). A copy that differs
+  only in that can be dropped when the tab also died before the answer.
+- **A phone on its side with more than one Safari tab:** Safari's tab bar
+  covers half of the strip. This is Safari's layout; one tab or the phone
+  upright solves it.
+- In the sideways strip only Save is shown beside a form field; Cancel and
+  Discard return when the keyboard closes. A tall text box shows its first
+  two lines. Add items shows the text box and the main button; the place
+  chooser and the photo buttons return when the keyboard closes.
+- The small Save of the AI settings page in the sideways strip was built the
+  same way but **not checked on a device**.
+- A narrow upright phone whose keyboard leaves under 200 pixels still has
+  Save at the end of the form.
+- The **sign-in page** on a phone held sideways was not part of this round.
+  One early Android run showed two failed checks there; it was not looked
+  into.
+- iPad "hide keyboard" key: as in the last round, to check on a real iPad.
+- Still no real phone in the hand. One Android version, Chrome only.
+
+### Evidence
+
+Outside the repository, in the same `mfp-runtime` folder: `ios-sim/uitest/`
+(`out-prod2-*`, `out-land3`), `android/` (`prod2-*`), and the scripts
+`pwa/device-drafts.sh` (kill and stopped-server steps for both systems).
 
 ## Final checklist
 
@@ -1427,7 +1632,8 @@ All on `feat/mobile-first-programme`, on top of `main` at `f026cae`.
 | `a846424` | Phase 6: end-to-end files, fixes found by them, real-model fixes, the Phase 6 record |
 | `e55fd2a` | Correction batch: the seven points of the review, and its record |
 | `d98436f` | Fixes from the iOS Simulator check, and its record |
-| the commit after `d98436f` | Corrections on review rows saved by themselves; fixes from more iOS sizes and Android; the last round record |
+| `9aada2f` | Corrections on review rows saved by themselves; fixes from more iOS sizes and Android; the last round record |
+| the commit after `9aada2f` | Corrections kept on the device until the server has them; top fields of a document review; phone and tablet on their side with the keyboard open; this record |
 
 The phases were built side by side, so they are not in number order.
 
@@ -1496,11 +1702,9 @@ note" was left out on purpose (point 3 of the decision).
 - **Each assistant change** costs three to five model requests.
 - **The phone rail in landscape** shows only about two rooms at a time. It
   scrolls, and it can be hidden.
-- **Small strips and wide screens with a touch keyboard:** see "Limits on
-  small strips and wide screens" in the last round record.
-- **Corrections saved by themselves:** see "Limits of the saving" in the last
-  round record (a kill within 0.6 seconds, leaving at once in Safari, the top
-  fields of a document review).
+- **Keyboard on small strips and wide screens, and corrections saved by
+  themselves:** see "Limits that remain" in the data and keyboard round
+  record.
 
 ## Not complete
 

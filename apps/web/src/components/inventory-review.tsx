@@ -37,6 +37,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, ApiError, getApiErrorMessage } from "@/lib/api";
+import { stableJson } from "@/lib/review-draft-store";
 import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
 import {
   appendOrigin,
@@ -390,7 +391,33 @@ export function InventoryReview({
   // An edit that was started under "Edit first" but not applied. It is kept when the
   // dialog closes. The server keeps it too: by itself a short moment later, and with
   // Skip. It comes back with a reload and with Restore.
+  // An edit that is kept for later is also kept on the server, without Skip or Apply.
+  const autosave = useDraftAutosave({ kind: "inventory", id: "suggestions" });
   const [editDrafts, setEditDrafts] = React.useState<Record<string, { name?: string; categoryId?: string }>>({});
+  // What the server keeps as the edit of each suggestion, as far as this page knows:
+  // from the answer of the server to a save, else from the loaded list. It goes with
+  // the copy of an edit on this device.
+  const serverEdits = React.useRef(new Map<string, unknown>());
+  const serverEdit = (suggestion: Pick<ReviewSuggestion, "evidence">) => {
+    const kept = (suggestion.evidence ?? {}).review_draft as
+      { name?: string; category_id?: string } | undefined;
+    return kept && typeof kept === "object" && (kept.name || kept.category_id)
+      ? { name: kept.name ?? null, category_id: kept.category_id ?? null } : null;
+  };
+  const editRequest = (id: string, body: unknown, base: unknown) => ({
+    path: `/inventory-review/suggestions/${id}/draft`,
+    body,
+    base,
+    // The answer is the suggestion as the server has it now.
+    rebase: (answer: unknown) => {
+      const kept = serverEdit((answer ?? {}) as ReviewSuggestion);
+      serverEdits.current.set(id, kept);
+      return kept;
+    },
+    // The list is read again, so that it has the kept edit when this review is
+    // opened again. The edit on the page stays as it is.
+    onSaved: () => void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSuggestionsAll }),
+  });
   const proposedEdit = (suggestion: ReviewSuggestion) => ({
     name: stringField(suggestion.after, "name") ?? "",
     categoryId: suggestion.category_id ?? stringField(suggestion.after, "category_id") ?? "",
@@ -411,8 +438,6 @@ export function InventoryReview({
     draft
       ? { draft: { ...(draft.name ? { name: draft.name } : {}), ...(draft.categoryId ? { category_id: draft.categoryId } : {}) } }
       : {};
-  // An edit that is kept for later is also kept on the server, without Skip or Apply.
-  const autosave = useDraftAutosave();
 
   const applyMutation = useMutation({
     mutationFn: ({
@@ -439,6 +464,7 @@ export function InventoryReview({
       setEditTarget(null);
       if (result.status === "applied") {
         // The edit is applied now; it is no longer a draft.
+        autosave.forget(suggestion.id);
         setEditDrafts((current) => {
           const next = { ...current };
           delete next[suggestion.id];
@@ -459,6 +485,8 @@ export function InventoryReview({
       ),
     onMutate: (suggestion) => autosave.cancel(suggestion.id),
     onSuccess: (result, suggestion) => {
+      // The skip carried the edit, so the copy on this device is not needed.
+      autosave.forget(suggestion.id);
       refreshReview();
       // Skip is remembered. Undo here, or Restore under Skipped, brings the row back.
       toast.success(`Skipped: ${suggestion.title}`, {
@@ -510,6 +538,7 @@ export function InventoryReview({
         result.results.filter((entry) => entry.status === "applied").map((entry) => entry.suggestion_id),
       );
       setSelectedSuggestionIds((current) => new Set([...current].filter((id) => !applied.has(id))));
+      for (const id of applied) autosave.forget(id);
       const summary = `${result.applied_count} applied, ${result.stale_count} stale, ${result.unsupported_count} advisory/skipped`;
       if (result.applied_count && !result.stale_count && !result.unsupported_count) {
         toast.success(`Bulk review applied: ${summary}.`);
@@ -523,6 +552,43 @@ export function InventoryReview({
   });
 
   const suggestions = suggestionsQuery.data?.items ?? [];
+  // An edit of an earlier visit can still be on this device: its request was lost, or
+  // it arrived but the page was gone before the answer. When its suggestion is in the
+  // loaded list, it is used only if the server still keeps what it kept when the edit
+  // was made. Then the row shows it again and it is sent again. When the server has
+  // something else (the edit itself, or a newer one from another device), the server
+  // wins and the copy is removed. Nothing is applied by this.
+  const recoveredEdits = autosave.recovered;
+  const saveEdit = autosave.save;
+  const forgetEdit = autosave.forget;
+  const loadedSuggestions = suggestionsQuery.data?.items;
+  React.useEffect(() => {
+    if (!loadedSuggestions || recoveredEdits.size === 0) return;
+    for (const [id, local] of [...recoveredEdits]) {
+      const suggestion = loadedSuggestions.find((entry) => entry.id === id);
+      // A suggestion that is not in this list waits until a list has it.
+      if (!suggestion) continue;
+      recoveredEdits.delete(id);
+      const kept = (local.body as { draft?: { name?: string; category_id?: string } } | null)?.draft;
+      // The server still keeps what it kept when the edit was made, or it keeps an
+      // edit that this browser sent itself and never got an answer for.
+      const now = stableJson(serverEdit(suggestion));
+      const ours = now === stableJson(local.base) || local.sent.some((sent) =>
+        stableJson(serverEdit({ evidence: { review_draft: (sent as { draft?: unknown } | null)?.draft } })) === now);
+      if (suggestion.status !== "pending" || !kept || typeof kept !== "object" || !ours) {
+        forgetEdit(id);
+        continue;
+      }
+      setEditDrafts((current) => id in current ? current : { ...current, [id]: {
+        ...(typeof kept.name === "string" && kept.name ? { name: kept.name } : {}),
+        ...(typeof kept.category_id === "string" && kept.category_id ? { categoryId: kept.category_id } : {}),
+      } });
+      serverEdits.current.set(id, local.base);
+      saveEdit(id, editRequest(id, local.body, local.base));
+    }
+    // `serverEdit` and `editRequest` read nothing that changes between renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forgetEdit, loadedSuggestions, recoveredEdits, saveEdit]);
   // Remembered across loading states so paging or rescoping does not collapse the filters.
   const [hadSuggestions, setHadSuggestions] = React.useState(false);
   if (!suggestionsQuery.isPending && hadSuggestions !== suggestions.length > 0) {
@@ -632,13 +698,9 @@ export function InventoryReview({
       const before = editDraftFor(editTarget) ?? {};
       const after = changed ?? {};
       if (canWrite && editTarget.status === "pending" && JSON.stringify(before) !== JSON.stringify(after)) {
-        autosave.save(editTarget.id, {
-          path: `/inventory-review/suggestions/${editTarget.id}/draft`,
-          body: dismissBody(after),
-          // The list is read again, so that it has the kept edit when this review is
-          // opened again. The edit on the page stays as it is.
-          onSaved: () => void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSuggestionsAll }),
-        });
+        const id = editTarget.id;
+        if (!serverEdits.current.has(id)) serverEdits.current.set(id, serverEdit(editTarget));
+        autosave.save(id, editRequest(id, dismissBody(after), serverEdits.current.get(id)));
       }
     }
     setEditTarget(null);

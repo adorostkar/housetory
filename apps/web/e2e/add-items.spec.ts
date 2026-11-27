@@ -261,3 +261,175 @@ test("corrections of a review row are kept across a reload without Skip or Add",
   const item = (await listed()).items[0]!;
   expect([item.name, item.quantity, item.room?.id]).toEqual([corrected, 2, room.id]);
 });
+
+// A text import with one row, read without AI, ready for review.
+async function oneRowImport(request: APIRequestContext, name: string, roomId: string) {
+  const created = await request.post("/api/v1/imports", {
+    multipart: { text: `- ${name}`, title: `Review of ${name}`, room_id: roomId },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const batchId = ((await created.json()) as { id: string }).id;
+  const stored = async () =>
+    (await (await request.get(`/api/v1/imports/${batchId}`)).json()) as {
+      status: string;
+      entries: Array<{ status: string; proposed: { name: string; quantity: number } }>;
+    };
+  await expect.poll(async () => (await stored()).status, { timeout: 30_000 }).toBe("review");
+  return { batchId, stored };
+}
+
+// Makes every request that keeps a draft fail in the browser, as it can while a page
+// closes. It is switched on and off with a flag that outlives a reload. A request
+// sent while the page closes is not seen by `page.route`, so the page itself is told.
+async function loseDraftRequests(page: Page) {
+  await page.addInitScript(() => {
+    const real = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (/\/draft$/.test(new URL(url, location.href).pathname) && sessionStorage.getItem("e2e-lose-drafts")) {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return real(input, init);
+    };
+  });
+}
+const setLosing = (page: Page, lose: boolean) =>
+  page.evaluate((on) => {
+    if (on) sessionStorage.setItem("e2e-lose-drafts", "1");
+    else sessionStorage.removeItem("e2e-lose-drafts");
+  }, lose);
+
+const localCopies = (page: Page) =>
+  page.evaluate(() =>
+    Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:v1:")),
+  );
+
+async function correctName(page: Page, from: string, to: string) {
+  const editor = page.getByTestId("bar-editor");
+  await page
+    .getByRole("article", { name: from, exact: true })
+    .getByRole("button", { name: `Edit name of ${from}` })
+    .click();
+  await editor.getByRole("textbox", { name: `Name of ${from}` }).fill(to);
+  await editor.getByRole("button", { name: "Save name" }).click();
+  await expect(editor).toHaveCount(0);
+}
+
+test("a correction whose request was lost is back after a reload, and the row still waits", async ({
+  page,
+  request,
+}) => {
+  const suffix = crypto.randomUUID().slice(0, 6);
+  const room = await createRoom(request, `Lost save room ${suffix}`);
+  const read = `Lost save widget ${suffix}`;
+  const corrected = `Lost save lamp ${suffix}`;
+  const { batchId, stored } = await oneRowImport(request, read, room.id);
+
+  // Every request that keeps a draft is lost, as it can be while a page closes.
+  await loseDraftRequests(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/imports/${batchId}`);
+  await setLosing(page, true);
+  await correctName(page, read, corrected);
+  // The copy is on this device at once. The page is reloaded before anything is sent.
+  expect(await localCopies(page)).toHaveLength(1);
+  await page.reload();
+
+  // The correction is back in its row. The row still waits: nothing was added.
+  const row = page.getByRole("article", { name: corrected, exact: true });
+  await expect(row).toBeVisible();
+  await expect(page.getByRole("article", { name: read, exact: true })).toHaveCount(0);
+  await expect(row.getByRole("checkbox", { name: `Select ${corrected}` })).not.toBeChecked();
+  await expect(row.getByRole("button", { name: "Add item", exact: true })).toBeEnabled();
+  // The server still does not have it, and the page says so in one quiet line.
+  await expect(page.getByText("Your corrections are not saved yet. Trying again.")).toBeVisible();
+  expect((await stored()).entries[0]!.proposed.name).toBe(read);
+  expect(await localCopies(page)).toHaveLength(1);
+
+  // When requests go through again, it is sent by itself and the copy is removed.
+  await setLosing(page, false);
+  await expect
+    .poll(async () => {
+      const entry = (await stored()).entries[0]!;
+      return [entry.status, entry.proposed.name];
+    }, { timeout: 20_000 })
+    .toEqual(["proposed", corrected]);
+  await expect.poll(() => localCopies(page)).toEqual([]);
+  await expect(page.getByText("Your corrections are not saved yet. Trying again.")).toHaveCount(0);
+  const items = await (await request.get(`/api/v1/items?q=${encodeURIComponent(corrected)}`)).json();
+  expect(items.total).toBe(0);
+});
+
+test("a newer correction from another device wins over the copy on this device", async ({
+  page,
+  request,
+}) => {
+  const suffix = crypto.randomUUID().slice(0, 6);
+  const room = await createRoom(request, `Other device room ${suffix}`);
+  const read = `Other device widget ${suffix}`;
+  const here = `Corrected on the phone ${suffix}`;
+  const elsewhere = `Corrected on the laptop ${suffix}`;
+  const { batchId, stored } = await oneRowImport(request, read, room.id);
+  const detail = (await (await request.get(`/api/v1/imports/${batchId}`)).json()) as {
+    entries: Array<{ id: string; proposed: Record<string, unknown> }>;
+  };
+  const entry = detail.entries[0]!;
+
+  await loseDraftRequests(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/imports/${batchId}`);
+  await setLosing(page, true);
+  await correctName(page, read, here);
+  expect(await localCopies(page)).toHaveLength(1);
+
+  // The same row is corrected on another device before this one is opened again.
+  const other = await request.put(`/api/v1/imports/${batchId}/entries/${entry.id}/draft`, {
+    data: { proposed: { ...entry.proposed, name: elsewhere }, edited_fields: ["name"] },
+  });
+  expect(other.ok(), await other.text()).toBeTruthy();
+  // The request of this device stays lost while the page reloads.
+  await page.reload();
+
+  // The server has something newer than this device knew, so it is shown and kept.
+  // The copy is removed and is not sent over it.
+  await expect(page.getByRole("article", { name: elsewhere, exact: true })).toBeVisible();
+  await expect(page.getByRole("article", { name: here, exact: true })).toHaveCount(0);
+  await expect.poll(() => localCopies(page)).toEqual([]);
+  // Requests go through again now. Nothing is sent over the newer correction.
+  await setLosing(page, false);
+  await page.waitForTimeout(1500);
+  expect((await stored()).entries[0]!.proposed.name).toBe(elsewhere);
+  await expect(page.getByText("Your corrections are not saved yet. Trying again.")).toHaveCount(0);
+});
+
+test("signing out removes the copies of corrections on this device", async ({ page, browser, request }) => {
+  const suffix = crypto.randomUUID().slice(0, 6);
+  const room = await createRoom(request, `Sign-out room ${suffix}`);
+  const read = `Sign-out widget ${suffix}`;
+  const { batchId } = await oneRowImport(request, read, room.id);
+
+  // A session of its own, so that signing out does not end the one the other tests use.
+  const origin = new URL(page.url() === "about:blank" ? test.info().project.use.baseURL! : page.url()).origin;
+  const context = await browser.newContext({ baseURL: origin, viewport: { width: 1440, height: 1000 } });
+  const login = await context.request.post("/api/v1/auth/login", {
+    data: {
+      email: process.env.E2E_EMAIL ?? "phase5@example.com",
+      password: process.env.E2E_PASSWORD ?? "phase-five-password-2026",
+    },
+  });
+  expect(login.ok(), await login.text()).toBeTruthy();
+  const own = await context.newPage();
+  await loseDraftRequests(own);
+  await own.goto(`/imports/${batchId}`);
+  await setLosing(own, true);
+  await correctName(own, read, `Sign-out lamp ${suffix}`);
+  expect(await localCopies(own)).toHaveLength(1);
+
+  await own.goto("/settings");
+  // The copy is still there after leaving the review: the server never confirmed it.
+  expect(await localCopies(own)).toHaveLength(1);
+  await own.getByRole("main").getByRole("button", { name: "Sign out" }).click();
+  await expect(own).toHaveURL(/\/login/);
+  expect(await localCopies(own)).toEqual([]);
+  await context.close();
+});

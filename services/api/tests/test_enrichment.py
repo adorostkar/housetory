@@ -790,6 +790,44 @@ def test_hierarchy_enrichment_preserves_entry_and_parent_identities(
     assert accepted.json()["total_entries"] == len(detail["entries"])
 
 
+def test_kept_document_corrections_do_not_make_suggestions_out_of_date(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    document = upload_document(owner_client)
+    review = ocr_document(owner_client, document["id"]).json()
+    payload = job_payload(review)
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+    line = next(entry for entry in review["lines"] if entry["kind"] == "product")
+    # The person corrects the top fields and a line while the suggestions are on their way.
+    header = {"merchant": "My own shop", "total": "12.50"}
+    saved = owner_client.put(
+        f"{review_url}/draft", json={"version": review["version"], "draft": header}
+    )
+    assert saved.status_code == 200, saved.text
+    kept = owner_client.put(
+        f"{review_url}/lines/{line['id']}/draft", json={"draft": {"quantity": "3"}}
+    )
+    assert kept.status_code == 200, kept.text
+
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: _refinement_payload())
+    assert run_enhancement(payload)["status"] == "ready"
+    after = owner_client.get(review_url).json()
+    assert after["version"] == review["version"]
+    assert after["enhancement"]["status"] == "ready"
+    assert after["suggested_refinement"] is not None
+    assert after["header_draft"]["version"] == review["version"]
+    assert {k: v for k, v in after["header_draft"]["draft"].items() if v is not None} == header
+    # A correction after the suggestions are ready leaves them ready too.
+    again = owner_client.put(
+        f"{review_url}/draft",
+        json={"version": review["version"], "draft": {**header, "currency": "SEK"}},
+    )
+    assert again.status_code == 200, again.text
+    assert owner_client.get(review_url).json()["enhancement"]["status"] == "ready"
+
+
 @pytest.mark.parametrize("change", ["merchant", "generation"])
 def test_document_proposal_is_separate_and_publication_holds_no_inference_lock(
     owner_client,

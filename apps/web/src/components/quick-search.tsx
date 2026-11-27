@@ -404,7 +404,19 @@ export function QuickSearch({
       const maxHeight = Math.max(0, Math.min(panelHeight, opensBelow ? below : above - 6));
       // Above the field the panel hangs from its lower edge, so a short list
       // still sits right on top of the field.
-      const next: React.CSSProperties = opensBelow
+      // A phone held sideways with the keyboard open: there is no room above the
+      // field, so the results stand beside it, in one row that scrolls sideways.
+      const beside = document.documentElement.dataset.keyboardSide !== undefined && rect.right < viewportWidth * 0.7;
+      const next: React.CSSProperties = beside
+        ? {
+            position: "fixed",
+            left: rect.right + 8,
+            right: "max(0.5rem, env(safe-area-inset-right))",
+            bottom: layoutHeight - anchorBottom,
+            maxHeight: Math.max(0, anchorBottom - visibleTop - 4),
+            zIndex: 80,
+          }
+        : opensBelow
         ? { position: "fixed", left, top: anchorBottom + 8, width, maxHeight, zIndex: 80 }
         : { position: "fixed", left, bottom: layoutHeight - anchorTop + 8, width, maxHeight, zIndex: 80 };
       const key = JSON.stringify(next);
@@ -529,6 +541,7 @@ export function QuickSearch({
       onClick={askAssistant}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-xs transition-colors",
+        "[[data-keyboard-side]_&]:min-h-11 [[data-keyboard-side]_&]:w-60 [[data-keyboard-side]_&]:shrink-0 [[data-keyboard-side]_&]:py-1",
         activeIndex === askIndex
           ? "bg-secondary text-foreground"
           : "text-foreground/85 hover:bg-secondary/70",
@@ -551,11 +564,11 @@ export function QuickSearch({
           <div
             ref={panelRef}
             style={panelStyle}
-            className="flex flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/98 shadow-lift backdrop-blur-xl"
+            className="flex flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/98 shadow-lift backdrop-blur-xl [[data-keyboard-side]_&]:justify-center [[data-keyboard-side]_&]:rounded-xl"
             id="quick-search-panel"
           >
             {term.length < 2 ? (
-              <p className="px-4 py-3 text-2xs text-muted-foreground" role="status">
+              <p className="px-4 py-3 text-2xs text-muted-foreground [[data-keyboard-side]_&]:py-1" role="status">
                 Keep typing to find items, boxes and places — then press Enter.
               </p>
             ) : error ? (
@@ -588,15 +601,15 @@ export function QuickSearch({
               </div>
             ) : results.length === 0 ? (
               <div
-                className="space-y-3 px-4 py-4 text-xs text-muted-foreground"
+                className="space-y-3 px-4 py-4 text-xs text-muted-foreground [[data-keyboard-side]_&]:flex [[data-keyboard-side]_&]:items-center [[data-keyboard-side]_&]:gap-3 [[data-keyboard-side]_&]:space-y-0 [[data-keyboard-side]_&]:overflow-x-auto [[data-keyboard-side]_&]:px-3 [[data-keyboard-side]_&]:py-1"
                 role="status"
                 aria-live="polite"
               >
-                <p className="flex items-center gap-2">
+                <p className="flex items-center gap-2 [[data-keyboard-side]_&]:shrink-0">
                   <Search className="size-4" />
                   No quick matches for “{term}”.
                 </p>
-                <p className="text-2xs leading-relaxed">
+                <p className="text-2xs leading-relaxed [[data-keyboard-side]_&]:hidden">
                   Press Enter to ask Housetory. Straightforward item searches
                   stay local and open a match directly.
                 </p>
@@ -614,11 +627,11 @@ export function QuickSearch({
                   id="quick-search-results"
                   role="listbox"
                   aria-label="Quick search results"
-                  className="min-h-0 flex-1 overflow-y-auto p-1.5"
+                  className="min-h-0 flex-1 overflow-y-auto p-1.5 [[data-keyboard-side]_&]:flex [[data-keyboard-side]_&]:flex-none [[data-keyboard-side]_&]:gap-1 [[data-keyboard-side]_&]:overflow-x-auto [[data-keyboard-side]_&]:overflow-y-hidden [[data-keyboard-side]_&]:overscroll-x-contain [[data-keyboard-side]_&]:p-1"
                 >
                   {groups.map((group) => (
-                    <section key={group.kind} aria-label={group.label}>
-                      <p className="px-2.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <section key={group.kind} aria-label={group.label} className="[[data-keyboard-side]_&]:contents">
+                      <p className="px-2.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground [[data-keyboard-side]_&]:hidden">
                         {group.label}
                       </p>
                       {group.results.map((result) => {
@@ -636,6 +649,7 @@ export function QuickSearch({
                             onClick={() => choose(result)}
                             className={cn(
                               "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors",
+                              "[[data-keyboard-side]_&]:min-h-11 [[data-keyboard-side]_&]:w-60 [[data-keyboard-side]_&]:shrink-0 [[data-keyboard-side]_&]:items-center [[data-keyboard-side]_&]:py-1",
                               index === activeIndex
                                 ? "bg-secondary text-foreground"
                                 : "text-foreground/85 hover:bg-secondary/70",
@@ -664,7 +678,7 @@ export function QuickSearch({
                   ))}
                   {askRow}
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2 [[data-keyboard-side]_&]:hidden">
                   <span className="text-2xs text-muted-foreground">
                     {results.length} quick match{results.length === 1 ? "" : "es"}
                     {search.data?.scope_label ? ` · ${search.data.scope_label}` : ""}

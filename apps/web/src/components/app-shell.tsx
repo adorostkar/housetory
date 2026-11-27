@@ -19,6 +19,7 @@ import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { isTextEntry, useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useCanWrite, usePendingActions, useReviewSummary } from "@/lib/queries";
+import { useReplayLocalReviewDrafts } from "@/lib/review-drafts";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
 import { useAssistantDocuments } from "@/lib/assistant-documents";
@@ -135,6 +136,8 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   }, []);
   const rail = useRailModel();
   useKeyboardInset();
+  // Corrections of an earlier visit that the server never confirmed are sent again.
+  useReplayLocalReviewDrafts();
   useKeepFocusedFieldVisible(softwareKeyboardOpen);
   useEffect(() => {
     // Things fixed to the bottom of the screen (bulk bars, save bars) sit above the bar.
@@ -434,7 +437,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
           // With a touch keyboard open (a tablet held sideways) the panel ends where the
           // keyboard begins. Its top stays where it is: a panel that followed the visible
           // part down the page would carry the focused field away from it again.
-          className="fixed right-0 top-0 z-30 h-[calc(var(--visual-viewport-top,0px)+var(--visual-viewport-height,100dvh))] overflow-y-auto overscroll-contain scroll-pb-24 scroll-pt-4 border-l border-border/70 bg-background px-6 pb-10 pt-6"
+          className="fixed right-0 top-0 z-30 h-[calc(var(--visual-viewport-top,0px)+var(--visual-viewport-height,100dvh))] overflow-y-auto overscroll-contain scroll-pb-24 scroll-pt-4 border-l border-border/70 bg-background px-6 pb-10 pt-6 [[data-keyboard]_&]:scroll-pb-0 [[data-keyboard]_&]:pb-2"
           // The bar does not reach under the panel, so nothing in it needs to clear the bar.
           style={{ width: PANEL_WIDTH, "--shell-bar-height": "0px" } as React.CSSProperties}
         >
@@ -483,7 +486,9 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             assistantTall ? "lg:top-4" : "lg:top-auto lg:h-[min(42rem,calc(var(--visual-viewport-height,100dvh)-2rem))]",
           )}
         >
-          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3 [[data-keyboard-tiny]_&]:hidden">
+          {/* A strip of some 70 px (a phone held sideways, keyboard open) has no room for
+              this row. Where the strip is wide, Close stands beside the message field. */}
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3 [[data-keyboard-tiny]:not([data-keyboard-side])_&]:hidden [[data-keyboard-side]_&]:absolute [[data-keyboard-side]_&]:inset-y-0 [[data-keyboard-side]_&]:left-[max(0.25rem,env(safe-area-inset-left))] [[data-keyboard-side]_&]:z-10 [[data-keyboard-side]_&]:border-0 [[data-keyboard-side]_&]:p-0">
             <DialogPrimitive.Title asChild><h2
               id="assistant-panel-title"
               ref={assistantHeading}
@@ -492,7 +497,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             >
               Assistant
             </h2></DialogPrimitive.Title>
-            <div ref={setAssistantHeader} className="min-w-0 flex-1" />
+            <div ref={setAssistantHeader} className="min-w-0 flex-1 [[data-keyboard-side]_&]:hidden" />
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
@@ -501,12 +506,12 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
                 aria-label={assistantTall ? "Make the assistant smaller" : "Make the assistant full height"}
                 title={assistantTall ? "Smaller" : "Full height"}
                 // On the narrowest phones the row has no room for it; the other buttons would wrap.
-                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2 max-[379px]:hidden"
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2 max-[379px]:hidden [[data-keyboard-side]_&]:hidden"
               >
                 {assistantTall ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
               </button>
               <Link to="/review" aria-label="Review queue" title="Review queue"
-                className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-secondary focus-visible:outline focus-visible:outline-2">
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-secondary focus-visible:outline focus-visible:outline-2 [[data-keyboard-side]_&]:hidden">
                 <ClipboardCheck className="size-4" />
               </Link>
               <button
@@ -520,7 +525,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             </div>
           </div>
           {/* A phone held sideways with the keyboard open: every point of height goes to the message field. */}
-          <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 [[data-keyboard-tiny]_&]:pb-1 [[data-keyboard-tiny]_&]:pt-0">
+          <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 [[data-keyboard-tiny]_&]:pb-1 [[data-keyboard-tiny]_&]:pt-0 [[data-keyboard-side]_&]:pl-[calc(3.25rem+env(safe-area-inset-left))]">
             {/* A review shown in the assistant edits its values in a bar at the foot of this surface. */}
             <BarEditorBoundary editorClassName="absolute inset-x-0 bottom-0 z-10 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 lg:rounded-b-2xl">
             <Suspense fallback={<PageFallback />}>

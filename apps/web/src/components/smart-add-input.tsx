@@ -551,9 +551,11 @@ export function SmartAddInput({
   const chipLabel = isDocument ? "Document" : KIND_LABEL[kind];
   const showInlinePicker = layout === "sheet" && pickerOpen;
 
+  // A phone held sideways with the keyboard open leaves a strip of some 70 px. The text
+  // box and the main button then stand side by side; the rest is below and scrolls.
   return (
-    <div className="grid gap-4">
-      <div className="relative">
+    <div className="grid gap-4 [[data-keyboard-side]_&]:gap-1">
+      <div className="relative [[data-keyboard-side]_&]:hidden">
         <button
           ref={chipRef}
           type="button"
@@ -578,7 +580,7 @@ export function SmartAddInput({
         picker
       ) : (
         <form
-          className="grid gap-3"
+          className="grid gap-3 [[data-keyboard-side]_&]:grid-cols-[minmax(0,1fr)_auto] [[data-keyboard-side]_&]:items-center [[data-keyboard-side]_&]:gap-x-2 [[data-keyboard-side]_&]:gap-y-1 [[data-keyboard-side]_&]:pr-11 [[data-keyboard-side]_&]:[&>*]:order-3 [[data-keyboard-side]_&]:[&>*]:col-span-2"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -588,6 +590,7 @@ export function SmartAddInput({
           <div
             className={cn(
               "rounded-2xl border border-input/90 bg-card/65 transition-[border-color,box-shadow] focus-within:border-ring/50 focus-within:ring-4 focus-within:ring-ring/10",
+              "[[data-keyboard-side]_&]:!order-1 [[data-keyboard-side]_&]:!col-span-1",
               dragging && "border-ring/60 ring-4 ring-ring/15",
               kind === "conflict" && "border-destructive/50",
             )}
@@ -635,7 +638,7 @@ export function SmartAddInput({
               placeholder={
                 "Two camping chairs in the garage…\nor paste one product link, or attach a PDF or photo."
               }
-              className="block min-h-28 w-full resize-none rounded-t-2xl bg-transparent px-4 pb-2 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:text-[0.95rem]"
+className="block min-h-28 w-full resize-none rounded-t-2xl bg-transparent px-4 pb-2 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:text-[0.95rem] [[data-keyboard-side]_&]:h-12 [[data-keyboard-side]_&]:min-h-0 [[data-keyboard-side]_&]:py-2.5"
             />
 
             {photo && (
@@ -692,7 +695,7 @@ export function SmartAddInput({
                 <Spinner /> Transcribing your voice note…
               </div>
             ) : (
-              <div className="flex items-center gap-1 border-t border-border/60 px-1.5 py-1">
+              <div className="flex items-center gap-1 border-t border-border/60 px-1.5 py-1 [[data-keyboard-side]_&]:hidden">
                 <button
                   type="button"
                   className={iconButton}
@@ -850,11 +853,11 @@ export function SmartAddInput({
             )}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between [[data-keyboard-side]_&]:!order-2 [[data-keyboard-side]_&]:!col-span-1">
             <Link
               to={manualHref}
               onClick={onFinish}
-              className="order-2 inline-flex min-h-11 items-center justify-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:order-1 lg:text-xs"
+              className="order-2 inline-flex min-h-11 items-center justify-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:order-1 lg:text-xs [[data-keyboard-side]_&]:hidden"
             >
               or fill in the form yourself
             </Link>

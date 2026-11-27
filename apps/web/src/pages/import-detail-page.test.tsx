@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,9 +54,14 @@ function batchOf(entries: ImportEntry[], patch: Partial<ImportBatchDetail> = {})
 }
 
 let server: ImportBatchDetail;
+// Without a signed-in user there is no copy of a correction on this device.
+let signedIn = false;
+const session = { authenticated: true, user: { id: "user-1" }, household: { id: "house-1" } };
+const localCopies = () => Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:"));
 
-function renderPage({ bar = false }: { bar?: boolean } = {}) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+function renderPage({ bar = false, client = new QueryClient({
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+}) }: { bar?: boolean; client?: QueryClient } = {}) {
   const page = <ImportDetailPage batchId="batch-1" embedded />;
   return render(
     <QueryClientProvider client={client}>
@@ -71,6 +76,8 @@ const row = (name: string) => screen.getByRole("article", { name });
 
 beforeEach(() => {
   drafts.clear();
+  localStorage.clear();
+  signedIn = false;
   server = batchOf([
     entry("e1", "Ladder"),
     entry("e2", "Rope"),
@@ -84,7 +91,7 @@ beforeEach(() => {
   ]);
   vi.mocked(api.get).mockReset();
   vi.mocked(api.get).mockImplementation(async (path: string) =>
-    (path === "/imports/batch-1" ? server : { items: [] }) as never);
+    (path === "/imports/batch-1" ? server : path === "/auth/session" && signedIn ? session : { items: [] }) as never);
   // Like the server: the draft of a waiting row is kept in its proposal. The row stays
   // as it is. A row that no longer waits answers 409.
   vi.mocked(api.put).mockReset();
@@ -524,9 +531,9 @@ describe("ImportDetailPage kept corrections", () => {
     await pass(600);
     expect(api.put).toHaveBeenCalledTimes(2);
     expect(vi.mocked(api.put).mock.calls[1]![1]).toEqual(expect.objectContaining({
-      proposed: expect.objectContaining({ name: "Ladder", quantity: 3 }),
+      proposed: expect.objectContaining({ name: "Step ladder", quantity: 3 }),
     }));
-    expect(within(row("Unnamed")).getByRole("textbox", { name: "Name of Ladder" })).toHaveValue("");
+    expect(within(row("Unnamed")).getByRole("textbox", { name: "Name of Step ladder" })).toHaveValue("");
   });
 
   it("keeps the action and its target, and a reload shows the row as it was corrected", async () => {
@@ -697,6 +704,188 @@ describe("ImportDetailPage kept corrections", () => {
       id: "e1", action: "import", proposed: expect.objectContaining({ name: "Step ladder", brand: "Wibe" }),
     })] });
     expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a correction again after a reload when its request was lost, and the row still waits", async () => {
+    signedIn = true;
+    const kept = vi.mocked(api.put).getMockImplementation()!;
+    // The request is lost, as it can be when a page is closed or reloaded just then.
+    vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
+    const view = await load();
+    type("Name of Ladder", "Step ladder");
+    fireEvent.change(within(row("Step ladder")).getByRole("spinbutton"), { target: { value: "2" } });
+    type("Name of Drill", "Drill 18V");
+    fireEvent.click(within(row("Drill 18V")).getByRole("button", { name: "Update this one" }));
+    // The copies are on this device before anything is sent.
+    expect(api.put).not.toHaveBeenCalled();
+    expect(localCopies().sort()).toEqual([
+      "housetory:review-draft:v1:user-1:house-1:import:batch-1:e1",
+      "housetory:review-draft:v1:user-1:house-1:import:batch-1:e3",
+    ]);
+    view.unmount();
+    expect(server.entries.map((item) => item.proposed.name)).toEqual(["Ladder", "Rope", "Drill"]);
+
+    // A reload: the page has nothing in memory, and the server never got the corrections.
+    vi.useRealTimers();
+    drafts.clear();
+    vi.mocked(api.put).mockReset();
+    vi.mocked(api.put).mockImplementation(kept);
+    renderPage();
+    const ladder = await screen.findByRole("article", { name: "Step ladder" });
+    expect(within(ladder).getByRole("spinbutton")).toHaveValue(2);
+    const drill = row("Drill 18V");
+    expect(within(drill).getByRole("button", { name: "Updating this one" })).toHaveAttribute("aria-pressed", "true");
+    // The rows still wait: nothing is selected, nothing was added or applied.
+    for (const box of screen.getAllByRole("checkbox", { name: /^Select / })) expect(box).not.toBeChecked();
+    expect(api.post).not.toHaveBeenCalled();
+    expect(server.entries.map((item) => item.status)).toEqual(["proposed", "proposed", "proposed"]);
+    // They are sent again by themselves. When the server has them, the copies go.
+    await waitFor(() => expect(server.entries[0]!.proposed).toEqual(
+      expect.objectContaining({ name: "Step ladder", quantity: 2 }),
+    ), { timeout: 3000 });
+    await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
+    expect(server.entries[2]!.proposed.relationships.review_draft).toEqual(
+      expect.objectContaining({ action: "merge", merge_item_id: "item-9" }),
+    );
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("lets the server win over a copy when the row was corrected somewhere else, or was saved after all", async () => {
+    signedIn = true;
+    const kept = vi.mocked(api.put).getMockImplementation()!;
+    vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
+    const view = await load();
+    type("Name of Ladder", "Step ladder");
+    type("Name of Rope", "Rope 30 m");
+    type("Name of Drill", "Drill 18V");
+    expect(localCopies()).toHaveLength(3);
+    view.unmount();
+    vi.useRealTimers();
+    drafts.clear();
+    vi.mocked(api.put).mockReset();
+    vi.mocked(api.put).mockImplementation(kept);
+    // Before this device is opened again, the ladder is corrected on another device.
+    // The request for the rope turns out to have reached the server after all.
+    const setName = (id: string, name: string) => {
+      server = { ...server, entries: server.entries.map((item) => item.id === id ? { ...item, proposed: {
+        ...item.proposed, name, relationships: { review_draft: {
+          action: "import", merge_item_id: null, merge_fields: [], allow_duplicate: false, edited_fields: ["name"],
+        } },
+      } } : item) };
+    };
+    setName("e1", "Ladder from the laptop");
+    setName("e2", "Rope 30 m");
+    renderPage();
+    // The newer correction of the other device is shown, not the copy of this one.
+    expect(await screen.findByRole("article", { name: "Ladder from the laptop" })).toBeVisible();
+    expect(screen.queryByRole("article", { name: "Step ladder" })).not.toBeInTheDocument();
+    expect(row("Rope 30 m")).toBeVisible();
+    // The drill is as the server had it when it was corrected here: its copy is used.
+    expect(row("Drill 18V")).toBeVisible();
+    await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
+    // Nothing went over the correction of the other device. The rope is what this
+    // browser sent itself, so it is sent once more, only to get its answer.
+    expect(vi.mocked(api.put).mock.calls.map((call) => call[0]).sort()).toEqual([draftPath("e2"), draftPath("e3")]);
+    expect(server.entries.map((item) => item.proposed.name)).toEqual(["Ladder from the laptop", "Rope 30 m", "Drill 18V"]);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps a newer correction when an older one of this browser reached the server without an answer", async () => {
+    signedIn = true;
+    const kept = vi.mocked(api.put).getMockImplementation()!;
+    // A slow link: the request reaches the server, but its answer never reaches the page.
+    vi.mocked(api.put).mockImplementation(async (path, body) => {
+      await kept(path, body);
+      return new Promise(() => undefined);
+    });
+    const view = await load();
+    type("Name of Ladder", "Step");
+    await pass(600);
+    expect(server.entries[0]!.proposed.name).toBe("Step");
+    // The person types more. The tab dies before that is sent.
+    type("Name of Step", "Step ladder");
+    expect(localCopies()).toHaveLength(1);
+    vi.mocked(api.put).mockImplementation(() => Promise.reject(new ApiError(0, "network_error", "No connection.")));
+    view.unmount();
+    expect(server.entries[0]!.proposed.name).toBe("Step");
+
+    // The review is opened again. The server has the first correction, which this
+    // browser sent itself, so the newer one is still good: it is shown and sent.
+    vi.useRealTimers();
+    drafts.clear();
+    vi.mocked(api.put).mockReset();
+    vi.mocked(api.put).mockImplementation(kept);
+    renderPage();
+    expect(await screen.findByRole("article", { name: "Step ladder" })).toBeVisible();
+    await waitFor(() => expect(server.entries[0]!.proposed.name).toBe("Step ladder"), { timeout: 3000 });
+    await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("starts the next correction from what the server confirmed, also when the review is opened again offline", async () => {
+    signedIn = true;
+    const kept = vi.mocked(api.put).getMockImplementation()!;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
+    const view = renderPage({ client });
+    await screen.findByRole("article", { name: "Ladder" });
+    vi.useFakeTimers();
+    type("Name of Ladder", "Step");
+    await pass(600);
+    expect(server.entries[0]!.proposed.name).toBe("Step");
+    expect(localCopies()).toEqual([]);
+    // The device goes offline. The person leaves the review and opens it again: the
+    // import is not read again, and nothing can be sent.
+    vi.mocked(api.put).mockImplementation(() => Promise.reject(new ApiError(0, "network_error", "No connection.")));
+    view.unmount();
+    vi.useRealTimers();
+    renderPage({ client });
+    await screen.findByRole("article", { name: "Step" });
+    vi.useFakeTimers();
+    type("Name of Step", "Step ladder");
+    const copy = JSON.parse(localStorage.getItem(localCopies()[0]!)!) as { base: { proposed: { name: string } } };
+    // The copy starts from the row the server confirmed, not from the row as it was first read.
+    expect(copy.base.proposed.name).toBe("Step");
+    cleanup();
+
+    // Back online after a reload: the server still has that row, so the copy is used.
+    vi.useRealTimers();
+    drafts.clear();
+    vi.mocked(api.put).mockReset();
+    vi.mocked(api.put).mockImplementation(kept);
+    renderPage();
+    expect(await screen.findByRole("article", { name: "Step ladder" })).toBeVisible();
+    await waitFor(() => expect(server.entries[0]!.proposed.name).toBe("Step ladder"), { timeout: 3000 });
+  });
+
+  it("keeps the copy when Add does not go through, removes it when it does, and drops one for a decided row", async () => {
+    signedIn = true;
+    const added = vi.mocked(api.post).getMockImplementation()!;
+    vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
+    await load();
+    type("Name of Ladder", "Step ladder");
+    vi.mocked(api.post).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+    fireEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
+    await pass(0);
+    // The decision failed. A reload now would still have the correction.
+    expect(localCopies()).toEqual(["housetory:review-draft:v1:user-1:house-1:import:batch-1:e1"]);
+    vi.mocked(api.post).mockImplementation(added);
+    fireEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
+    await pass(0);
+    expect(within(row("Step ladder")).getByText("Added")).toBeVisible();
+    expect(localCopies()).toEqual([]);
+
+    // A copy for a row that was decided elsewhere in the meantime is not shown and is removed.
+    cleanup();
+    vi.useRealTimers();
+    drafts.clear();
+    localStorage.setItem("housetory:review-draft:v1:user-1:house-1:import:batch-1:e1", JSON.stringify({
+      path: draftPath("e1"), at: Date.now(),
+      body: { action: "import", proposed: { ...server.entries[0]!.proposed, name: "Old correction" } },
+    }));
+    renderPage();
+    await screen.findByRole("article", { name: "Step ladder" });
+    expect(screen.queryByRole("article", { name: "Old correction" })).not.toBeInTheDocument();
+    await waitFor(() => expect(localCopies()).toEqual([]));
   });
 
   it("waits a moment, without a message, when other rows of the import are being added just then", async () => {

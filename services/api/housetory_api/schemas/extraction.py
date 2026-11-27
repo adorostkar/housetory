@@ -181,6 +181,40 @@ class ExtractionLineSkipRequest(BaseModel):
         return value
 
 
+class ExtractionHeaderDraft(BaseModel):
+    """The fields at the top of a document review, as the person typed them.
+
+    They are text, not checked values: a draft may hold a half-typed date or amount.
+    Nothing here is applied by the server. It is stored and given back unchanged.
+    """
+
+    merchant: str | None = Field(default=None, max_length=200)
+    purchase_date: str | None = Field(default=None, max_length=40)
+    document_date: str | None = Field(default=None, max_length=40)
+    currency: str | None = Field(default=None, max_length=8)
+    total: str | None = Field(default=None, max_length=40)
+    order_number: str | None = Field(default=None, max_length=120)
+    # Whether a purchase is recorded when the review is applied. An existing
+    # purchase is chosen from the matched items, so it is not kept here.
+    purchase_action: Literal["none", "create"] | None = None
+
+
+class ExtractionHeaderDraftRequest(BaseModel):
+    # The extraction version the fields were corrected for.
+    version: str = Field(min_length=1, max_length=200)
+    # Without a draft, the kept one is forgotten: the first reading is shown again.
+    draft: ExtractionHeaderDraft | None = None
+
+
+class ExtractionHeaderDraftOut(BaseModel):
+    version: str
+    draft: ExtractionHeaderDraft
+
+
+class ExtractionHeaderDraftState(BaseModel):
+    header_draft: ExtractionHeaderDraftOut | None = None
+
+
 class ExtractionReviewOut(BaseModel):
     document_id: uuid.UUID
     version: str
@@ -199,6 +233,8 @@ class ExtractionReviewOut(BaseModel):
     # review, the lines that have no state can still be applied one by one.
     line_states: dict[str, ExtractionLineState] = Field(default_factory=dict)
     applied_version: str | None = None
+    # The corrected fields at the top of the review, kept while the review waits.
+    header_draft: ExtractionHeaderDraftOut | None = None
     ai_status: AiStatus
     enhancement: EnhancementState | None = None
     suggested_refinement: "ExtractionRefinementOut | None" = None

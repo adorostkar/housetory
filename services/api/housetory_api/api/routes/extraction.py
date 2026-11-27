@@ -8,6 +8,8 @@ from ...domain import OcrStatus
 from ...schemas.extraction import (
     ExtractionApplyRequest,
     ExtractionApplyResult,
+    ExtractionHeaderDraftRequest,
+    ExtractionHeaderDraftState,
     ExtractionLineSkipRequest,
     ExtractionLineState,
     ExtractionLineStatesOut,
@@ -67,7 +69,14 @@ def _review(db: Session, document) -> ExtractionReviewOut:
     states = _line_states(db, document)
     review.line_states = states.line_states
     review.applied_version = states.applied_version
+    review.header_draft = _header_draft(document).header_draft
     return review
+
+
+def _header_draft(document) -> ExtractionHeaderDraftState:
+    return ExtractionHeaderDraftState.model_validate(
+        {"header_draft": document_extraction_apply.header_draft(document)}
+    )
 
 
 def _line_inputs(document, request: ExtractionMatchRequest | None = None) -> list[LineMatchInput]:
@@ -209,6 +218,27 @@ def skip_extraction_line(
         edits=payload.model_dump() if payload else None,
     )
     return _line_states(db, document)
+
+
+@router.put("/{document_id}/extraction/draft", response_model=ExtractionHeaderDraftState)
+def save_extraction_header_draft(
+    document_id: uuid.UUID,
+    payload: ExtractionHeaderDraftRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionHeaderDraftState:
+    """Keep the corrected fields at the top of the review. Nothing is applied."""
+    document = _review_document(db, auth.household.id, document_id)
+    document_extraction.ensure_extraction(db, document)
+    document = document_extraction_apply.save_header_draft(
+        db,
+        auth.household.id,
+        document,
+        version=payload.version,
+        draft=payload.draft.model_dump(exclude_none=True) if payload.draft else None,
+        actor_user_id=auth.user.id,
+    )
+    return _header_draft(document)
 
 
 @router.put(

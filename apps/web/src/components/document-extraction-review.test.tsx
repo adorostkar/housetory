@@ -208,11 +208,18 @@ const readyProcessing: DocumentProcessing = {
   timings: { local_queue_ms: 1, local_processing_ms: 2, ai_queue_ms: 3, provider_ms: 4, validation_ms: 5 },
 };
 
+// Without a signed-in user there is no copy of a correction on this device.
+let signedIn = false;
+const localCopies = () => Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:"));
+
 vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
   return {
     ...actual,
     useCanWrite: () => true,
+    useSession: () => ({
+      data: signedIn ? { user: { id: "user-1" }, household: { id: "house-1", default_currency: "USD" } } : undefined,
+    }),
     useInvalidateInventory: () => vi.fn(),
     useRooms: () => ({ data: { items: [room] } }),
     useLocations: () => ({ data: { items: [location] } }),
@@ -257,6 +264,8 @@ async function selectLine(index = 0) {
 }
 
 beforeEach(() => {
+  signedIn = false;
+  localStorage.clear();
   vi.mocked(toast.message).mockClear();
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
@@ -1206,6 +1215,189 @@ describe("DocumentExtractionReview", () => {
       const bits = line("Drill Bit Set");
       expect(within(bits).getByText("19.90")).toBeVisible();
       expect(within(bits).getByText("Office")).toBeVisible();
+    });
+
+    const headerPath = `/documents/${document.id}/extraction/draft`;
+    const headerCalls = () => vi.mocked(api.put).mock.calls.filter(([path]) => path === headerPath);
+    const field = (label: RegExp) => screen.getByLabelText(label);
+
+    it("keeps the fields at the top like a line, and a reload fills them again without applying anything", async () => {
+      // Like the server: the fields are kept with their version. Nothing else changes.
+      vi.mocked(api.put).mockImplementation(async (path, body) => {
+        if (path === headerPath) {
+          const sent = body as { version: string; draft: object | null };
+          extraction = { ...extraction, header_draft: sent.draft ? { version: sent.version, draft: sent.draft } : null } as typeof extraction;
+        }
+        return {};
+      });
+      const view = await load();
+      await pass(2000);
+      expect(api.put).not.toHaveBeenCalled();
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner" } });
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner Hardware AB" } });
+      fireEvent.change(field(/^Purchase date/), { target: { value: "2026-02-15" } });
+      fireEvent.change(field(/^Total/), { target: { value: "190.5" } });
+      fireEvent.change(field(/^Order or invoice number/), { target: { value: "ORD-7" } });
+      fireEvent.click(screen.getByRole("button", { name: "No purchase change" }));
+      await pass(599);
+      expect(api.put).not.toHaveBeenCalled();
+      await pass(1);
+      // One request with the whole set of fields, for the version on screen.
+      expect(vi.mocked(api.put).mock.calls).toEqual([[headerPath, { version: "version-1", draft: {
+        merchant: "Corner Hardware AB", purchase_date: "2026-02-15", document_date: "2026-02-14",
+        currency: "USD", total: "190.5", order_number: "ORD-7", purchase_action: "none",
+      } }, undefined]]);
+      expect(api.post).not.toHaveBeenCalled();
+
+      // A reload has only what the server kept. The fields are filled; nothing is applied.
+      view.unmount();
+      vi.useRealTimers();
+      cleanupRender();
+      vi.mocked(api.put).mockClear();
+      await renderReview(undefined, true, undefined, false, false);
+      expect(field(/^Merchant/)).toHaveValue("Corner Hardware AB");
+      expect(field(/^Purchase date/)).toHaveValue("2026-02-15");
+      expect(field(/^Document date/)).toHaveValue("2026-02-14");
+      expect(field(/^Total/)).toHaveValue(190.5);
+      expect(field(/^Order or invoice number/)).toHaveValue("ORD-7");
+      expect(screen.getByRole("button", { name: "No purchase change" })).toHaveAttribute("aria-pressed", "true");
+      for (const box of screen.getAllByRole("checkbox", { name: /^Select line/ })) expect(box).not.toBeChecked();
+      vi.useFakeTimers();
+      await pass(2000);
+      expect(api.put).not.toHaveBeenCalled();
+      expect(api.post).not.toHaveBeenCalled();
+
+      // Typing the first reading back removes the kept draft.
+      fireEvent.change(field(/^Merchant/), { target: { value: "CORNER HARDWARE" } });
+      fireEvent.change(field(/^Purchase date/), { target: { value: "2026-02-14" } });
+      fireEvent.change(field(/^Total/), { target: { value: "188.44" } });
+      fireEvent.change(field(/^Order or invoice number/), { target: { value: "INV-9001" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create purchase" }));
+      await pass(600);
+      expect(headerCalls()).toEqual([[headerPath, { version: "version-1", draft: null }, undefined]]);
+    });
+
+    it("does not use fields that were kept for another version of the reading", async () => {
+      extraction = { ...extraction, header_draft: { version: "version-0", draft: { merchant: "Old shop" } } } as typeof extraction;
+      await load();
+      expect(field(/^Merchant/)).toHaveValue("CORNER HARDWARE");
+    });
+
+    it("puts corrections back after a reload when their requests were lost, and applies nothing", async () => {
+      signedIn = true;
+      vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
+      const view = await load();
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner Hardware AB" } });
+      fireEvent.change(field(/^Total/), { target: { value: "190.5" } });
+      correctBits();
+      // The copies are on this device before anything is sent.
+      expect(api.put).not.toHaveBeenCalled();
+      expect(localCopies().sort()).toEqual([
+        "housetory:review-draft:v1:user-1:house-1:document:document-1:header",
+        "housetory:review-draft:v1:user-1:house-1:document:document-1:line-2",
+      ]);
+      view.unmount();
+
+      // A reload: the server never got them, and nothing of this visit is in memory.
+      vi.useRealTimers();
+      cleanupRender();
+      const sent: Array<[string, unknown]> = [];
+      vi.mocked(api.put).mockReset();
+      vi.mocked(api.put).mockImplementation(async (path, body) => { sent.push([path, body]); return {}; });
+      expect(extraction).toBe(twoLines);
+      await renderReview(undefined, true, undefined, false, false);
+      expect(field(/^Merchant/)).toHaveValue("Corner Hardware AB");
+      expect(field(/^Total/)).toHaveValue(190.5);
+      const bits = line("Drill Bit Set");
+      expect(within(bits).getByText("19.90")).toBeVisible();
+      expect(within(bits).getByText("Office")).toBeVisible();
+      // The line still waits and is not selected. Nothing was applied by putting it back.
+      expect(within(bits).getByRole("checkbox", { name: /^Select line/ })).not.toBeChecked();
+      expect(within(bits).getByRole("button", { name: "Add item" })).toBeEnabled();
+      expect(api.post).not.toHaveBeenCalled();
+      // They are sent again by themselves. When the server has them, the copies go.
+      await waitFor(() => expect(sent.map(([path]) => path).sort()).toEqual([headerPath, draftPath("line-2")]), { timeout: 3000 });
+      expect(sent.find(([path]) => path === headerPath)![1]).toEqual({ version: "version-1", draft: expect.objectContaining({
+        merchant: "Corner Hardware AB", total: "190.5",
+      }) });
+      await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
+      expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("lets the server win over a copy when a line or the fields were corrected somewhere else", async () => {
+      signedIn = true;
+      vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
+      const view = await load();
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner Hardware AB" } });
+      correctBits();
+      const drill = line("Cordless Drill");
+      fireEvent.click(within(drill).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(drill).getByLabelText(/^Line total/), { target: { value: "140.5" } });
+      expect(localCopies()).toHaveLength(3);
+      view.unmount();
+      vi.useRealTimers();
+      cleanupRender();
+      const sent: string[] = [];
+      vi.mocked(api.put).mockReset();
+      vi.mocked(api.put).mockImplementation(async (path) => { sent.push(path); return {}; });
+      // Before this device is opened again, the bit set and the fields at the top are
+      // corrected on another device. The drill line is as it was.
+      extraction = { ...twoLines,
+        header_draft: { version: "version-1", draft: { merchant: "Shop from the laptop" } },
+        line_states: { "line-2": { status: "pending", description: "Drill Bit Set", quantity: 1, line_total_cents: 3000,
+          draft: { lineTotal: "30.00" } } },
+      } as typeof extraction;
+      await renderReview(undefined, true, undefined, false, false);
+      // The newer corrections are shown, not the copies of this device.
+      expect(field(/^Merchant/)).toHaveValue("Shop from the laptop");
+      expect(within(line("Drill Bit Set")).getByText("30.00")).toBeVisible();
+      expect(within(line("Drill Bit Set")).queryByText("19.90")).not.toBeInTheDocument();
+      // The drill line is as the server had it when it was corrected here: its copy is used.
+      expect(within(line("Cordless Drill")).getByText("140.5")).toBeVisible();
+      await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
+      // Only the drill line was sent. Nothing went over what the server had for the rest.
+      expect(sent).toEqual([draftPath("line-1")]);
+      expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("keeps newer corrections when older ones of this browser reached the server without an answer", async () => {
+      signedIn = true;
+      // A slow link: each request reaches the server, but its answer never reaches the page.
+      const reach = vi.mocked(api.put).getMockImplementation()!;
+      vi.mocked(api.put).mockImplementation(async (path, body) => {
+        if (path === headerPath) {
+          const sent = body as { version: string; draft: object | null };
+          extraction = { ...extraction, header_draft: sent.draft ? { version: sent.version, draft: sent.draft } : null } as typeof extraction;
+        } else {
+          await reach(path, body);
+        }
+        return new Promise(() => undefined);
+      });
+      const view = await load();
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner" } });
+      correctBits();
+      await pass(600);
+      expect((extraction.line_states as Record<string, { line_total_cents: number }>)["line-2"]!.line_total_cents).toBe(1990);
+      // The person types more. The tab dies before any of that is sent.
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner Hardware AB" } });
+      fireEvent.change(within(line("Drill Bit Set")).getByLabelText(/^Line total/), { target: { value: "21" } });
+      vi.mocked(api.put).mockImplementation(() => Promise.reject(new ApiError(0, "network_error", "No connection.")));
+      view.unmount();
+
+      // The review is opened again. The server has the first corrections, which this
+      // browser sent itself, so the newer ones are still good: they are shown and sent.
+      vi.useRealTimers();
+      cleanupRender();
+      const sent: Array<[string, unknown]> = [];
+      vi.mocked(api.put).mockReset();
+      vi.mocked(api.put).mockImplementation(async (path, body) => { sent.push([path, body]); return {}; });
+      await renderReview(undefined, true, undefined, false, false);
+      expect(field(/^Merchant/)).toHaveValue("Corner Hardware AB");
+      expect(within(line("Drill Bit Set")).getByText("21")).toBeVisible();
+      await waitFor(() => expect(sent.map(([path]) => path).sort()).toEqual([headerPath, draftPath("line-2")]), { timeout: 3000 });
+      expect(sent.find(([path]) => path === draftPath("line-2"))![1]).toEqual(expect.objectContaining({ line_total_cents: 2100 }));
+      await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
+      expect(api.post).not.toHaveBeenCalled();
     });
 
     it("sends what still waits when the page is hidden and when the review goes away", async () => {

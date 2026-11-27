@@ -20,6 +20,12 @@ import { isTextEntry } from "@/hooks/use-software-keyboard-open";
 const SHORT_HEIGHT = 420;
 /** Under this height there is room for one field and nothing else. */
 const TINY_HEIGHT = 200;
+/**
+ * A strip that is tiny and at least this wide is a phone held sideways. There is no
+ * room above the field, but there is room beside it: Save, Close and the search
+ * results are then placed beside the field that is typed in.
+ */
+const SIDE_WIDTH = 560;
 
 export function layoutViewportHeight(): number {
   return Math.max(window.innerHeight, document.documentElement.clientHeight);
@@ -43,7 +49,7 @@ export function useKeyboardInset(): void {
       const inset = keyboard ? Math.max(0, Math.round(layoutHeight - viewport.height - viewport.offsetTop)) : 0;
       const top = keyboard ? Math.max(0, Math.round(viewport.offsetTop)) : 0;
       const height = keyboard ? Math.round(viewport.height) : 0;
-      const key = `${inset}/${top}/${height}`;
+      const key = `${inset}/${top}/${height}/${Math.round(viewport.width)}`;
       if (key === last) return;
       last = key;
       root.style.setProperty("--keyboard-inset", `${inset}px`);
@@ -60,6 +66,8 @@ export function useKeyboardInset(): void {
       // 70 px. Only the field that is typed in can be shown there.
       if (keyboard && height < TINY_HEIGHT) root.dataset.keyboardTiny = "";
       else delete root.dataset.keyboardTiny;
+      if (keyboard && height < TINY_HEIGHT && viewport.width >= SIDE_WIDTH) root.dataset.keyboardSide = "";
+      else delete root.dataset.keyboardSide;
     };
     const schedule = () => {
       if (!frame) {
@@ -81,8 +89,19 @@ export function useKeyboardInset(): void {
       if (!follow) follow = window.requestAnimationFrame(followField);
       schedule();
     };
+    // In a sideways strip Save, Close and the results stand beside the field. A tap on
+    // a button would first take the focus from the field: the keyboard would start to
+    // close, everything would move back, and the tap would miss its button. So the
+    // field keeps the focus for that tap. The button still gets its click.
+    const keepFocus = (event: MouseEvent) => {
+      if (root.dataset.keyboardSide === undefined || !isTextEntry(document.activeElement)) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || isTextEntry(target)) return;
+      if (target.closest("button, a, [role='button'], [role='option']")) event.preventDefault();
+    };
     measure();
     onFocus();
+    document.addEventListener("mousedown", keepFocus, true);
     viewport.addEventListener("resize", schedule);
     viewport.addEventListener("scroll", schedule);
     window.addEventListener("resize", schedule);
@@ -91,6 +110,7 @@ export function useKeyboardInset(): void {
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       if (follow) window.cancelAnimationFrame(follow);
+      document.removeEventListener("mousedown", keepFocus, true);
       viewport.removeEventListener("resize", schedule);
       viewport.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
@@ -101,6 +121,7 @@ export function useKeyboardInset(): void {
       root.style.removeProperty("--visual-viewport-height");
       delete root.dataset.keyboard;
       delete root.dataset.keyboardTiny;
+      delete root.dataset.keyboardSide;
     };
   }, []);
 }

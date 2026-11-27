@@ -126,10 +126,24 @@ Simulator record") the rules are these:
   and notes hide, the Add-items heading does not stick. Tiny: the room rail
   and the assistant's top row hide and a form's Save bar does not stick, so
   the field that is typed in has the strip.
+- A tiny strip that is at least 560 px wide is a phone held sideways. The root
+  then also carries `data-keyboard-side`, and things stand **beside** the
+  field instead of above it (`[[data-keyboard-side]_&]:…`):
+  - the bar's field takes the left part and the search results stand to its
+    right, in one row that scrolls sideways;
+  - the assistant shows Close to the left of the message field;
+  - Add items shows the text box, the main button and Close in one row;
+  - the item form leaves the right part of the strip free and Save stands
+    there. The field that is typed in stands on the lower edge of the strip;
+    a tall field shows its first lines.
+- In that strip a tap on a button does not take the focus from the field.
+  Otherwise the keyboard would start to close, everything would move back,
+  and the tap would miss its button. The button still gets its click.
 - The wide layout follows a touch keyboard too (a tablet held sideways): the
   bar and the bar editor stand on it, the assistant box and centred dialogs
-  stay in the visible part, the item side panel ends where the keyboard
-  begins, and its Save bar does not stick while the keyboard is open.
+  stay in the visible part, and the item side panel ends where the keyboard
+  begins. Its Save bar stays in view, and the field that is typed in is kept
+  above it. A centred dialog that scrolls keeps Close at its top.
 - A box may follow the visible **bottom**. Its top must not follow
   `--visual-viewport-top` when the focused field can lie outside what is
   seen: the browser then moves the view again and the field runs away. The

@@ -75,7 +75,11 @@ export function BottomBar({
             )}
           </button>
         )}
-        <div className="min-w-0 flex-1">{children({ onFocusChange: setTyping })}</div>
+        {/* A phone held sideways with the keyboard open: the field takes the left part, the
+            search results stand beside it. */}
+        <div className={cn("min-w-0 flex-1", narrow && "[[data-keyboard-side]_&]:w-[42%] [[data-keyboard-side]_&]:flex-none")}>
+          {children({ onFocusChange: setTyping })}
+        </div>
         {!narrow && (
           <button
             type="button"
