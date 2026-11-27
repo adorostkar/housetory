@@ -1376,3 +1376,202 @@ def test_skipped_line_keeps_its_complete_draft_through_reload_and_restore(owner_
     assert purchase["allocated_total_cents"] == 14000 + 5000
     states = owner_client.get(review_url).json()["line_states"]
     assert {states[lamp["id"]]["status"], states[roller["id"]]["status"]} == {"applied"}
+
+
+def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
+    room = create_room(owner_client)
+    existing = create_item(owner_client, name="Paint Roller", room_id=room["id"], quantity=1)
+    document = upload_document(owner_client, THREE_LINE_RECEIPT)
+    extraction = ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT).json()
+    ladder, roller, lamp = [line for line in extraction["lines"] if line["kind"] == "product"]
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+
+    def draft_url(line):
+        return f"{review_url}/lines/{line['id']}/draft"
+
+    empty = {
+        "name": "",
+        "brand": "",
+        "model": "",
+        "serialNumber": "",
+        "roomId": "",
+        "locationId": "",
+    }
+    no_warranty = {"enabled": False, "provider": "", "startDate": "", "endDate": "", "months": ""}
+    # The whole row as the review holds it: amounts, the action and its target, the
+    # new item with its place, the updates, the stock choice and the warranty.
+    lamp_draft = {
+        "description": "Work lamp, LED",
+        "quantity": "1",
+        "unitPrice": "150.00",
+        "lineTotal": "140.00",
+        "action": "create",
+        "itemId": "",
+        "addQuantity": False,
+        "newItem": {
+            "name": "LED work lamp",
+            "brand": "Osram",
+            "model": "L-100",
+            "serialNumber": "SN-LAMP-9",
+            "roomId": room["id"],
+            "locationId": "",
+        },
+        "updates": empty,
+        "warranty": {**no_warranty, "enabled": True, "provider": "Osram", "endDate": "2029-02-14"},
+    }
+    roller_draft = {
+        "description": "Paint roller, wide",
+        "quantity": "2",
+        "unitPrice": "25.00",
+        "lineTotal": "50.00",
+        "action": "update",
+        "itemId": existing["id"],
+        "addQuantity": True,
+        "newItem": {**empty, "name": "Paint Roller"},
+        "updates": {**empty, "name": "Paint roller XL", "brand": "Anza"},
+        "warranty": no_warranty,
+        "candidate": {"id": existing["id"], "name": "Paint Roller"},
+    }
+    drafts = {lamp["id"]: lamp_draft, roller["id"]: roller_draft}
+
+    def states():
+        return owner_client.get(review_url).json()["line_states"]
+
+    first = owner_client.put(
+        draft_url(lamp), json={"draft": {**lamp_draft, "description": "First try"}}
+    )
+    assert first.status_code == 200, first.text
+    for line in (lamp, roller):
+        # The last write wins, and the same draft twice changes nothing.
+        for _attempt in range(2):
+            saved = owner_client.put(
+                draft_url(line),
+                json={
+                    "description": drafts[line["id"]]["description"],
+                    "quantity": int(drafts[line["id"]]["quantity"]),
+                    "draft": drafts[line["id"]],
+                },
+            )
+            assert saved.status_code == 200, saved.text
+
+    # A reload: the lines still wait, with the whole draft. Nothing was applied, the
+    # third line has no state at all, and the document is as it was.
+    kept = states()
+    assert ladder["id"] not in kept
+    for line_id, draft in drafts.items():
+        assert kept[line_id]["status"] == "pending"
+        assert kept[line_id]["draft"] == draft
+    assert owner_client.get(review_url).json()["applied_version"] is None
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(DocumentExtractionApply)) == 0
+        assert db.scalar(select(func.count()).select_from(Item)) == 1
+
+    # Who may not write, and what is not accepted. None of it changes what is stored.
+    viewer_token, _ = _add_member(owner_client, email="draft-viewer@example.com", role="viewer")
+    body = {"draft": {**lamp_draft, "description": "Changed by someone else"}}
+    denied = owner_client.put(draft_url(lamp), headers=_headers(viewer_token), json=body)
+    assert denied.status_code == 403
+    for bad in (
+        {"draft": {"blob": "x" * 21_000}},
+        {"draft": lamp_draft, "quantity": 0},
+        {"draft": "not a draft"},
+    ):
+        assert owner_client.put(draft_url(lamp), json=bad).status_code == 422, bad.keys()
+    unknown = owner_client.put(f"{review_url}/lines/no-such-line/draft", json=body)
+    assert unknown.status_code == 422
+    assert unknown.json()["detail"]["code"] == "extraction_line_not_found"
+    first_household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
+    second = owner_client.post(
+        "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
+    )
+    assert second.status_code == 201, second.text
+    other = {"X-Household-Id": second.json()["household"]["id"]}
+    assert owner_client.put(draft_url(lamp), headers=other, json=body).status_code == 404
+    assert owner_client.post(f"/api/v1/households/{first_household}/select").status_code == 200
+    owner_client.headers["X-Household-Id"] = first_household
+    assert states() == kept
+
+    # A skipped line does not take a draft: 409, and its marker is as it was.
+    skip = f"{review_url}/lines/{ladder['id']}"
+    assert owner_client.post(f"{skip}/skip", json={"description": "Ladder"}).status_code == 200
+    skipped_state = states()[ladder["id"]]
+    late = owner_client.put(draft_url(ladder), json={"draft": {"description": "Late ladder"}})
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "extraction_line_skipped"
+    assert states()[ladder["id"]] == skipped_state
+    # After Restore it waits again and takes one. An empty body forgets it.
+    assert owner_client.post(f"{skip}/restore").status_code == 200
+    again = owner_client.put(draft_url(ladder), json={"draft": {"description": "Tall ladder"}})
+    assert again.status_code == 200, again.text
+    assert states()[ladder["id"]]["draft"] == {"description": "Tall ladder"}
+    assert owner_client.put(draft_url(ladder), json={}).status_code == 200
+    assert ladder["id"] not in states()
+    assert owner_client.put(draft_url(ladder)).status_code == 200
+
+    # Applying what the kept drafts say gives records with the edited values.
+    kept_lamp, kept_roller = states()[lamp["id"]]["draft"], states()[roller["id"]]["draft"]
+    applied = owner_client.post(
+        f"{review_url}/apply",
+        json={
+            "request_id": str(uuid.uuid4()),
+            "extraction_version": extraction["version"],
+            "purchase_action": "create",
+            "purchase": {"merchant": "Corner Hardware", "price_cents": 30000, "currency": "USD"},
+            "lines": [
+                {
+                    "line_id": lamp["id"],
+                    "action": kept_lamp["action"],
+                    "quantity": int(kept_lamp["quantity"]),
+                    "line_total_cents": 14000,
+                    "new_item": {
+                        "name": kept_lamp["newItem"]["name"],
+                        "quantity": int(kept_lamp["quantity"]),
+                        "brand": kept_lamp["newItem"]["brand"],
+                        "model": kept_lamp["newItem"]["model"],
+                        "serial_number": kept_lamp["newItem"]["serialNumber"],
+                        "room_id": kept_lamp["newItem"]["roomId"],
+                    },
+                    "warranty": {
+                        "provider": kept_lamp["warranty"]["provider"],
+                        "end_date": kept_lamp["warranty"]["endDate"],
+                    },
+                },
+                {
+                    "line_id": roller["id"],
+                    "action": kept_roller["action"],
+                    "item_id": kept_roller["itemId"],
+                    "add_quantity": kept_roller["addQuantity"],
+                    "quantity": int(kept_roller["quantity"]),
+                    "updates": {
+                        "name": kept_roller["updates"]["name"],
+                        "brand": kept_roller["updates"]["brand"],
+                    },
+                },
+            ],
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    created = owner_client.get(f"/api/v1/items/{applied.json()['created_item_ids'][0]}").json()
+    created = created["item"]
+    assert created["name"] == "LED work lamp"
+    assert (created["brand"], created["model"], created["serial_number"]) == (
+        "Osram",
+        "L-100",
+        "SN-LAMP-9",
+    )
+    assert created["room"]["id"] == room["id"]
+    assert created["warranty"]["end_date"] == "2029-02-14"
+    updated = owner_client.get(f"/api/v1/items/{existing['id']}").json()["item"]
+    assert (updated["name"], updated["brand"]) == ("Paint roller XL", "Anza")
+    assert updated["quantity"] == 3
+    purchase = owner_client.get(f"/api/v1/purchases/{applied.json()['purchase_id']}").json()
+    assert purchase["allocated_total_cents"] == 14000 + 5000
+
+    # An applied line does not take a draft any more. The ladder still waits.
+    final = states()
+    assert {final[lamp["id"]]["status"], final[roller["id"]]["status"]} == {"applied"}
+    done = owner_client.put(draft_url(lamp), json=body)
+    assert done.status_code == 409
+    assert done.json()["detail"]["code"] == "extraction_line_applied"
+    assert states() == final
+    assert ladder["id"] not in final

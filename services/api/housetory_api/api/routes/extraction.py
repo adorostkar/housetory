@@ -211,6 +211,30 @@ def skip_extraction_line(
     return _line_states(db, document)
 
 
+@router.put(
+    "/{document_id}/extraction/lines/{line_id}/draft", response_model=ExtractionLineStatesOut
+)
+def save_extraction_line_draft(
+    document_id: uuid.UUID,
+    line_id: str,
+    payload: ExtractionLineSkipRequest | None = None,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionLineStatesOut:
+    """Keep the corrections of one line that still waits. An empty body forgets them."""
+    document = _review_document(db, auth.household.id, document_id)
+    document_extraction.ensure_extraction(db, document)
+    document = document_extraction_apply.save_line_draft(
+        db,
+        auth.household.id,
+        document,
+        line_id,
+        actor_user_id=auth.user.id,
+        edits=payload.model_dump() if payload else None,
+    )
+    return _line_states(db, document)
+
+
 @router.post(
     "/{document_id}/extraction/lines/{line_id}/restore", response_model=ExtractionLineStatesOut
 )

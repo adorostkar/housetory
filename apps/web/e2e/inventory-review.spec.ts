@@ -188,6 +188,54 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   ).toHaveCount(0);
 });
 
+test("an edit that is kept for later is still there after a reload, without Skip or Apply", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const id = suffix();
+  const room = await createRoom(request, `Kept edit room ${id}`);
+  const tools = await createCategory(request, `Kept edit tools ${id}`);
+  await createItem(request, `Kept Plane ${id}`, room.id, { category_id: tools.id });
+  const lower = await createItem(request, `Kept plane ${id}`, room.id, { category_id: tools.id });
+  const edited = `Kept plane No. 4 ${id}`;
+
+  await page.goto("/review");
+  await clickFindSuggestions(page);
+  await page.getByLabel("Search suggestions").fill(id);
+  const card = page
+    .locator("li")
+    .filter({ hasText: `Use consistent name “Kept Plane ${id}”` })
+    .first();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Edit first" }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit before accepting" });
+  await dialog.getByRole("textbox", { name: "Proposed name" }).fill(edited);
+  // Keeping the edit sends it to the server a short moment later. Nothing is decided.
+  const kept = page.waitForResponse(
+    (entry) =>
+      entry.request().method() === "PUT" &&
+      /\/api\/v1\/inventory-review\/suggestions\/[^/]+\/draft$/.test(new URL(entry.url()).pathname),
+  );
+  await dialog.getByRole("button", { name: "Keep for later" }).click();
+  expect((await kept).ok()).toBeTruthy();
+  await expect(card).toContainText(`Your edit: ${edited}`);
+  const stored = async () =>
+    ((await (await request.get(`/api/v1/items/${lower.item.id}`, {
+      headers: await currentHeaders(request),
+    })).json()) as { item: { name: string } }).item.name;
+  expect(await stored()).toBe(`Kept plane ${id}`);
+
+  await page.reload();
+  await page.getByLabel("Search suggestions").fill(id);
+  await expect(card).toContainText(`Your edit: ${edited}`);
+  await expect(card.getByRole("button", { name: "Skip", exact: true })).toBeVisible();
+  // The row's own button applies the edit that was kept, not the first proposal.
+  await card.getByRole("button", { name: "Apply change", exact: true }).click();
+  await expect(page.getByText("Suggestion applied to the item.")).toBeVisible();
+  await expect.poll(stored).toBe(edited);
+});
+
 test("Review item origins preserve scope, queue filters, search and edit roundtrips", async ({
   page,
   request,

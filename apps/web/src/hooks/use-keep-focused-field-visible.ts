@@ -46,18 +46,33 @@ export function useKeepFocusedFieldVisible(keyboardOpen: boolean): void {
       let delta = 0;
       if (rect.height > room || rect.top < top + GAP) delta = rect.top - (top + GAP);
       else if (rect.bottom > bottom - GAP) delta = rect.bottom - (bottom - GAP);
-      if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: "auto" });
+      if (Math.abs(delta) <= 1) return;
+      // The field may live in a part that scrolls by itself (the item panel beside the list).
+      let scroller: HTMLElement | null = field.parentElement;
+      while (scroller && scroller !== document.body) {
+        const overflow = window.getComputedStyle(scroller).overflowY;
+        if ((overflow === "auto" || overflow === "scroll") && scroller.scrollHeight > scroller.clientHeight + 1) break;
+        scroller = scroller.parentElement;
+      }
+      if (scroller && scroller !== document.body) scroller.scrollBy({ top: delta, behavior: "auto" });
+      else window.scrollBy({ top: delta, behavior: "auto" });
     };
-    // After the browser's own scrolling for the keyboard has ended.
+    // After the browser's own scrolling for the keyboard has ended. The keyboard
+    // slides in for some time and the page's parts take their new size during it,
+    // so the place is checked once more a little later.
+    let later = 0;
     const schedule = () => {
       window.clearTimeout(timer);
+      window.clearTimeout(later);
       timer = window.setTimeout(check, 350);
+      later = window.setTimeout(check, 900);
     };
     schedule();
     visual.addEventListener("resize", schedule);
     document.addEventListener("focusin", schedule);
     return () => {
       window.clearTimeout(timer);
+      window.clearTimeout(later);
       visual.removeEventListener("resize", schedule);
       document.removeEventListener("focusin", schedule);
     };

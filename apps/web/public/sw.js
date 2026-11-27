@@ -14,6 +14,17 @@ const PRECACHE = [
 ];
 
 self.addEventListener("install", (event) => {
+  // API requests never need this worker. Where the browser can be told so, it
+  // sends them straight to the network without waking the worker. This matters
+  // for a save that is sent while the page is being left: passing through the
+  // worker at that moment can lose it.
+  if (typeof event.addRoutes === "function") {
+    try {
+      event.addRoutes([{ condition: { urlPattern: "/api/*" }, source: "network" }]);
+    } catch {
+      // An older form of this browser feature: the fetch handler below still lets API requests pass.
+    }
+  }
   event.waitUntil(
     caches
       .open(CACHE_NAME)

@@ -82,6 +82,17 @@ Restoring changes nothing else, and accepting it later still checks that the
 item did not change. If the same suggestion is already pending again, nothing
 is restored. Possible duplicates, missing details and
 location wording are advisory and cannot be accepted as automatic mutations.
+
+**Edit first** lets the person change the proposed name or category.
+**Keep for later** closes the edit without deciding. The edit is then kept on
+the server by itself, a short moment later and at once when the page is
+hidden, left or closed (`PUT /inventory-review/suggestions/{id}/draft`). The
+suggestion still waits: its status, its fingerprint, the memory of dismissals
+and the history are not changed. A reload shows the row with **Your edit**,
+and **Apply change** and the bulk action apply that edit. An empty draft
+forgets the edit. A suggestion that no longer waits answers 409 and keeps
+nothing. If a save fails, the page keeps the edit, shows one quiet line and
+tries again.
 Bulk accept applies only compatible pending category/name/organisation suggestions and
 reports applied/skipped/stale/unsupported outcomes. The `organisation` queue type and
 `apply_organisation` action are additive; existing category/name rows and actions remain
@@ -188,7 +199,7 @@ clear disabled, not-configured, consent-needed and attention states.
   receives at most 40 items missing a category or tags.
 - On-demand runs are synchronous. Scheduled runs use the durable worker queue and
   report queued/running/completed/partial/failed/skipped states.
-- Viewers can read suggestions but cannot run, apply, dismiss or undo.
+- Viewers can read suggestions but cannot run, apply, dismiss, undo or keep an edit.
 - Members can run offline reviews and apply/dismiss; only owners can request the
   optional AI pass.
 - Scheduling is opt-in, owner-only and off by default. On the Review page an
@@ -209,8 +220,9 @@ clear disabled, not-configured, consent-needed and attention states.
 - `POST /inventory-review/runs`
 - `POST /inventory-review/suggestions/{id}/accept`
 - `POST /inventory-review/suggestions/{id}/dismiss`
+- `PUT /inventory-review/suggestions/{id}/draft`
 - `POST /inventory-review/suggestions/{id}/undo`
-- `POST /inventory-review/suggestions/bulk-accept`
+- `POST /inventory-review/suggestions/bulk-accept` (optional `edits` by suggestion id)
 
 
 ## Queue context and navigation

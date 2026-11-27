@@ -17,6 +17,7 @@ from ...schemas.imports import (
     ImportSourceFileOut,
     ProposedItem,
 )
+from ..import_row_drafts import public_proposed
 from ..recognition_geometry import stored_region
 
 
@@ -61,7 +62,8 @@ def serialize_import_entry(
         source_path=entry.source_path,
         source_excerpt=entry.source_excerpt,
         note_title=entry.note_title,
-        proposed=ProposedItem.model_validate(entry.proposed),
+        # The first reading that is kept with a draft stays on the server.
+        proposed=ProposedItem.model_validate(public_proposed(entry.proposed)),
         field_sources=entry.field_sources or {},
         confidence=entry.confidence,
         status=entry.status,

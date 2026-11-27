@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
@@ -2182,3 +2182,97 @@ def test_organisation_accept_enforces_permissions_and_household_taxonomy(owner_c
     state = item_response.json()["item"]
     assert state["category"]["id"] == category["id"]
     assert state["tags"] == []
+
+
+def test_edit_of_a_waiting_suggestion_is_kept_without_skip_or_apply(owner_client):
+    client = owner_client
+    room = create_room(client)
+    lighting = create_category(client, "Lighting")
+    create_item(client, "Camp lamp", room["id"], category_id=lighting["id"])
+    create_item(client, "camp lamp", room["id"])
+    assert run_review(client).status_code == 200
+    editable = next(
+        entry for entry in suggestions(client)["items"] if entry["action_kind"] == "apply_name"
+    )
+    url = f"/api/v1/inventory-review/suggestions/{editable['id']}"
+
+    def stored():
+        return next(e for e in suggestions(client)["items"] if e["id"] == editable["id"])
+
+    def events():
+        with SessionLocal() as db:
+            return db.scalar(select(func.count()).select_from(ActivityEvent))
+
+    history_before = events()
+    summary_before = client.get("/api/v1/inventory-review/summary").json()
+    assert client.put(f"{url}/draft", json={"draft": {"name": "First try"}}).status_code == 200
+    draft = {"name": "Camp lamp, LED"}
+    for _attempt in range(2):
+        saved = client.put(f"{url}/draft", json={"draft": draft})
+        assert saved.status_code == 200, saved.text
+
+    # A reload: the suggestion still waits, with the edit. Nothing else moved: not its
+    # fingerprint, not its proposal, not the counts, not the history, not the item.
+    kept = stored()
+    assert kept["evidence"]["review_draft"] == draft
+    assert kept["status"] == "pending"
+    # Only the edit and the time of the row's last write differ.
+    same = {**kept, "evidence": editable["evidence"], "updated_at": editable["updated_at"]}
+    assert same == editable
+    assert client.get("/api/v1/inventory-review/summary").json() == summary_before
+    assert events() == history_before
+    assert item_state(client, editable["item_id"])["name"] == editable["before"]["name"]
+    # Another review of the same things keeps the row and its edit.
+    assert run_review(client).json()["created_suggestion_count"] == 0
+    assert stored()["evidence"]["review_draft"] == draft
+
+    # Who may not write, and what is not accepted. None of it changes what is stored.
+    viewer = add_member(client, "viewer", email="draft-viewer@example.com")
+    body = {"draft": {"name": "Changed by someone else"}}
+    assert client.put(f"{url}/draft", headers=viewer, json=body).status_code == 403
+    for bad in ({"draft": {"name": "x" * 201}}, {"draft": {"category_id": "nope"}}, {}):
+        assert client.put(f"{url}/draft", json=bad).status_code == 422, bad
+    first_household = client.get("/api/v1/auth/session").json()["household"]["id"]
+    second = client.post(
+        "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
+    )
+    assert second.status_code == 201, second.text
+    other = {"X-Household-Id": second.json()["household"]["id"]}
+    assert client.put(f"{url}/draft", headers=other, json=body).status_code == 404
+    assert client.post(f"/api/v1/households/{first_household}/select").status_code == 200
+    client.headers["X-Household-Id"] = first_household
+    assert stored()["evidence"]["review_draft"] == draft
+
+    # An empty draft forgets the edit.
+    assert client.put(f"{url}/draft", json={"draft": {}}).status_code == 200
+    assert "review_draft" not in stored()["evidence"]
+    assert client.put(f"{url}/draft", json={"draft": draft}).status_code == 200
+
+    # A skipped suggestion does not take a draft: 409, and what Skip kept is as it was.
+    assert client.post(f"{url}/dismiss").status_code == 200
+    late = client.put(f"{url}/draft", json=body)
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "review_suggestion_not_pending"
+    dismissed = next(
+        e for e in suggestions(client, "dismissed")["items"] if e["id"] == editable["id"]
+    )
+    assert dismissed["evidence"]["review_draft"] == draft
+    # The memory of the dismissal holds: the same finding does not come back.
+    assert run_review(client).json()["created_suggestion_count"] == 0
+    assert editable["fingerprint"] not in {e["fingerprint"] for e in suggestions(client)["items"]}
+
+    # Restored, it waits again with the edit. The bulk action applies a selected
+    # suggestion with its edit, as the single accept does, and renames the item.
+    assert client.post(f"{url}/undo").json()["suggestion"]["status"] == "pending"
+    assert stored()["evidence"]["review_draft"] == draft
+    accepted = client.post(
+        "/api/v1/inventory-review/suggestions/bulk-accept",
+        json={
+            "suggestion_ids": [editable["id"]],
+            "edits": {editable["id"]: stored()["evidence"]["review_draft"]},
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["applied_count"] == 1
+    assert item_state(client, editable["item_id"])["name"] == "Camp lamp, LED"
+    assert client.put(f"{url}/draft", json=body).status_code == 409

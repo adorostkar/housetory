@@ -45,6 +45,7 @@ import type {
 import { cn, formatCurrency, formatDate, pluralize } from "@/lib/utils";
 import { MoreDetails, ReviewRow, SkippedRow, SkippedSection, type ReviewValue } from "@/components/review-row";
 import {
+  type ExtractionLineState,
   type ExtractionLineStates,
   type ExtractionReviewWithStates,
   type LineDraft,
@@ -63,6 +64,7 @@ import {
 } from "@/components/document-extraction-helpers";
 import { ItemSearchPicker } from "@/components/document-extraction-item-picker";
 import { enhancementLabel } from "@/lib/enrichment";
+import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
 
 export function DocumentExtractionReview({ document, onOpenChange, manualReviewRequest = 0, captureContext, enabled = true }: {
   document: DocumentRecord;
@@ -128,6 +130,13 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   const manualChosenRef = React.useRef(false);
   const editedRef = React.useRef(false);
   const [newVersionAvailable, setNewVersionAvailable] = React.useState(false);
+  // Corrections of waiting lines are kept on the server by themselves. `savedLines`
+  // holds what the server has for each line as far as this review knows. `loadCount`
+  // goes up each time a review is loaded: those rows are the start, not a correction.
+  const autosave = useDraftAutosave();
+  const savedLines = React.useRef(new Map<string, string>());
+  const [loadCount, setLoadCount] = React.useState(0);
+  const startedFrom = React.useRef(0);
   const sourceData = extractionQuery.data;
   const data = sourceData && activeRefinement
     ? { ...sourceData, fields: activeRefinement.fields, lines: activeRefinement.lines,
@@ -155,28 +164,34 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       proposalMatches.map((match) => [match.line_id, match]),
     );
     const productLines = lines.filter((line) => line.kind === "product");
-    setDrafts(
-      productLines.map((line) => {
-        const draft = lineDraft(
-          line,
-          matchMap[line.id]?.candidates[0],
-          fields,
-          productLines.length === 1,
-        );
-        // A line that was skipped comes back with the complete draft it had then:
-        // amounts, action and target, new item, updates, stock and warranty.
-        const state = extractionQuery.data?.line_states?.[line.id];
-        const kept = restoreLineDraft(draft, state);
-        if (captureContext?.documentId !== document.id) return kept;
-        // The place chosen at capture is only a start. A place that was changed on
-        // the row and kept with a skip wins over it.
-        const keptPlace = state && state.status !== "applied"
-          && Boolean((state.draft as { newItem?: unknown } | null | undefined)?.newItem);
-        if (keptPlace) return kept;
-        return { ...kept, newItem: { ...kept.newItem,
-          roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
-      }),
-    );
+    const loaded = productLines.map((line) => {
+      const draft = lineDraft(
+        line,
+        matchMap[line.id]?.candidates[0],
+        fields,
+        productLines.length === 1,
+      );
+      // A line that was skipped comes back with the complete draft it had then:
+      // amounts, action and target, new item, updates, stock and warranty.
+      const state = extractionQuery.data?.line_states?.[line.id];
+      const kept = restoreLineDraft(draft, state);
+      if (captureContext?.documentId !== document.id) return kept;
+      // The place chosen at capture is only a start. A place that was changed on
+      // the row and kept with a skip wins over it.
+      const keptPlace = state && state.status !== "applied"
+        && Boolean((state.draft as { newItem?: unknown } | null | undefined)?.newItem);
+      if (keptPlace) return kept;
+      return { ...kept, newItem: { ...kept.newItem,
+        roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
+    });
+    setLoadCount((count) => count + 1);
+    setDrafts(loaded);
+    // A line that came back with a kept correction counts as edited: suggestions that
+    // arrive later must not replace it without the person asking for them.
+    if (productLines.some((line) => {
+      const state = extractionQuery.data?.line_states?.[line.id];
+      return state?.status === "pending" && Boolean(state.draft);
+    })) editedRef.current = true;
     // An item that was chosen by hand is not among the proposed matches after a
     // reload. It was kept with the draft, so the row can still name its target.
     setMatches(productLines.reduce((all, line) => {
@@ -354,6 +369,10 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
         }),
       );
     },
+    onMutate: (lineIds) => {
+      // The apply carries the values of these lines. A draft that still waits is dropped.
+      for (const id of lineIds) autosave.cancel(id);
+    },
     onSuccess: (result, lineIds) => {
       requestIds.current.delete([...lineIds].sort().join(","));
       setApplyResult(result);
@@ -379,26 +398,50 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       void queryClient.invalidateQueries({ queryKey: queryKeys.document(document.id) });
       toast.success("Reviewed extraction applied");
     },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
+    onError: (error, lineIds) => {
+      // Nothing was applied, so the lines still wait. Their corrections are kept again.
+      for (const id of lineIds) savedLines.current.delete(id);
+      toast.error(getApiErrorMessage(error));
+    },
   });
+
+  // The whole row as the server keeps it, with a skip and for a line that still waits:
+  // the values of the row and its complete draft, with the item it points to.
+  const keptBody = (draft: LineDraft) => ({
+    description: draft.description.trim().slice(0, 300) || null,
+    quantity: parseQuantity(draft.quantity),
+    line_total_cents: parseMoney(draft.lineTotal),
+    draft: serializeLineDraft(
+      draft,
+      matches.find((match) => match.line_id === draft.line.id)
+        ?.candidates.find((candidate) => candidate.id === draft.itemId),
+    ),
+  });
+
+  // What two drafts are compared by. The chosen item counts by its id only: fresh
+  // match details of the same item are not a correction.
+  const keptText = (body: ReturnType<typeof keptBody>) => {
+    const candidate = body.draft.candidate as { id?: string } | undefined;
+    return JSON.stringify({ ...body, draft: { ...body.draft, candidate: candidate?.id ?? null } });
+  };
 
   // Skip is remembered by the server, so a skipped line does not come back by itself.
   const skipMutation = useMutation({
     mutationFn: ({ draft, restore }: { draft: LineDraft; restore: boolean }) =>
       api.post<ExtractionLineStates>(
         `/documents/${document.id}/extraction/lines/${draft.line.id}/${restore ? "restore" : "skip"}`,
-        restore ? undefined : {
-          description: draft.description.trim().slice(0, 300) || null,
-          quantity: parseQuantity(draft.quantity),
-          line_total_cents: parseMoney(draft.lineTotal),
-          // The whole row, so that a reload and Restore bring all of it back.
-          draft: serializeLineDraft(
-            draft,
-            matches.find((match) => match.line_id === draft.line.id)
-              ?.candidates.find((candidate) => candidate.id === draft.itemId),
-          ),
-        },
+        // The whole row, so that a reload and Restore bring all of it back.
+        restore ? undefined : keptBody(draft),
       ),
+    onMutate: ({ draft, restore }) => {
+      autosave.cancel(draft.line.id);
+      // The skip carries the draft itself, so the server has it when the skip goes through.
+      if (!restore) savedLines.current.set(draft.line.id, keptText(keptBody(draft)));
+    },
+    onError: (error, { draft, restore }) => {
+      if (!restore) savedLines.current.delete(draft.line.id);
+      toast.error(getApiErrorMessage(error));
+    },
     onSuccess: (result, { draft, restore }) => {
       queryClient.setQueryData<ExtractionReviewWithStates>(extractionKey, (current) =>
         current && ({ ...current, ...result }));
@@ -413,8 +456,54 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
         action: { label: "Undo", onClick: () => skipMutation.mutate({ draft, restore: true }) },
       });
     },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
   });
+
+  // Keeps the corrections of waiting lines on the server, a short moment after the
+  // last change of a line. Only a line that differs from what the server has is sent,
+  // with its whole draft. A line that is applied or skipped has no draft to keep, and
+  // a line that is being applied or skipped right now is left to that request.
+  const saveDraft = autosave.save;
+  const keptStates = extractionQuery.data?.line_states;
+  const applyingLines = applyMutation.isPending ? applyMutation.variables : undefined;
+  const skippingLine = skipMutation.isPending ? skipMutation.variables?.draft.line.id : undefined;
+  React.useEffect(() => {
+    if (!canWrite) return;
+    // The rows of a review that was just loaded are the start for every line.
+    const start = startedFrom.current !== loadCount;
+    startedFrom.current = loadCount;
+    if (start) savedLines.current = new Map();
+    const changed: Record<string, ExtractionLineState> = {};
+    for (const draft of drafts) {
+      const id = draft.line.id;
+      const status = keptStates?.[id]?.status;
+      if (status === "applied" || status === "skipped") continue;
+      if (applyingLines?.includes(id) || skippingLine === id) continue;
+      const body = keptBody(draft);
+      const text = keptText(body);
+      if (start) {
+        savedLines.current.set(id, text);
+        continue;
+      }
+      if (savedLines.current.get(id) === text) continue;
+      savedLines.current.set(id, text);
+      saveDraft(id, {
+        path: `/documents/${document.id}/extraction/lines/${encodeURIComponent(id)}/draft`,
+        body,
+      });
+      changed[id] = { status: "pending", ...body };
+    }
+    // The loaded review remembers the draft at once, so that coming back to this
+    // document shows the corrections without waiting for the server. The rows on
+    // screen are not touched by this: they are set up only when a review is loaded.
+    if (Object.keys(changed).length) {
+      queryClient.setQueryData<ExtractionReviewWithStates>(
+        [...queryKeys.document(document.id), "extraction"],
+        (current) => current && ({ ...current, line_states: { ...current.line_states, ...changed } }),
+      );
+    }
+    // `keptBody` and `keptText` read only the rows and the matches, which are both listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyingLines, canWrite, document.id, drafts, keptStates, loadCount, matches, queryClient, saveDraft, skippingLine]);
 
   if (document.ocr_status === "queued" || document.ocr_status === "processing") {
     return (
@@ -1177,6 +1266,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
             </span>
           </div>
         )}
+        <DraftSaveNotice show={autosave.unsaved} className="px-1 text-xs text-muted-foreground" />
         {drafts.length === 0 ? (
           <div className="surface px-4 py-6 text-xs text-muted-foreground">
             No product lines were recognised. Review the source text and use manual search or

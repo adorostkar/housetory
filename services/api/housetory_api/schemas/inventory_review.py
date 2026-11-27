@@ -279,6 +279,9 @@ class ReviewAcceptRequest(BaseModel):
 
 class ReviewBulkAcceptRequest(BaseModel):
     suggestion_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+    # The "Edit first" edit of a selected suggestion, by its id. It is applied in place
+    # of the proposal, as the single accept does.
+    edits: dict[uuid.UUID, ReviewAcceptRequest] = Field(default_factory=dict, max_length=50)
 
     @model_validator(mode="after")
     def _unique(self) -> "ReviewBulkAcceptRequest":
@@ -318,6 +321,12 @@ class ReviewDismissRequest(BaseModel):
     draft: ReviewDismissDraft | None = None
 
 
+class ReviewDraftRequest(BaseModel):
+    """An "Edit first" edit of a suggestion that still waits. An empty draft forgets it."""
+
+    draft: ReviewDismissDraft
+
+
 __all__ = [
     "ReviewAcceptRequest",
     "ReviewActionKind",
@@ -325,6 +334,7 @@ __all__ = [
     "ReviewBulkAcceptRequest",
     "ReviewDecisionOut",
     "ReviewDismissRequest",
+    "ReviewDraftRequest",
     "ReviewRunOut",
     "ReviewRunRequest",
     "ReviewRunTrigger",

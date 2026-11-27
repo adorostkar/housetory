@@ -422,6 +422,36 @@ def dismiss_suggestion(
     return _decision(db, suggestion, "skipped", "Suggestion dismissed.")
 
 
+def save_suggestion_draft(
+    db: Session,
+    household_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    draft: dict[str, Any],
+) -> InventoryReviewSuggestion:
+    """Keep an "Edit first" edit of a suggestion that still waits. Nothing is decided.
+
+    The edit is stored where Skip stores it. The status, the fingerprint, the memory of
+    dismissals and the history are not touched. An empty draft forgets the kept edit.
+    """
+    suggestion = _load_suggestion(db, household_id, suggestion_id)
+    if suggestion.status != "pending":
+        raise ApiError(
+            409,
+            "review_suggestion_not_pending",
+            f"This suggestion is {suggestion.status}. Its edit was not kept.",
+        )
+    evidence = {
+        key: value
+        for key, value in (suggestion.evidence_json or {}).items()
+        if key != REVIEW_DRAFT_KEY
+    }
+    if draft:
+        evidence[REVIEW_DRAFT_KEY] = draft
+    suggestion.evidence_json = evidence
+    db.flush()
+    return suggestion
+
+
 def _restore_dismissed(
     db: Session,
     household_id: uuid.UUID,
@@ -613,6 +643,7 @@ def bulk_accept(
     *,
     actor_user_id: uuid.UUID | None,
     actor_name: str | None,
+    edits: dict[uuid.UUID, ReviewAcceptRequest] | None = None,
 ) -> ReviewBulkAcceptOut:
     results: list[ReviewDecisionOut] = []
     for suggestion_id in suggestion_ids:
@@ -655,7 +686,7 @@ def bulk_accept(
             db,
             household_id,
             suggestion.id,
-            ReviewAcceptRequest(),
+            (edits or {}).get(suggestion.id) or ReviewAcceptRequest(),
             actor_user_id=actor_user_id,
             actor_name=actor_name,
         )

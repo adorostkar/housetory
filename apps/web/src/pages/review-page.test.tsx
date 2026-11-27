@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type {
   ItemSummary,
   ReviewRun,
@@ -266,6 +266,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
             updated_at: "2026-11-06T12:00:00Z",
           };
         }
+        // An edit of a waiting suggestion that is kept for later.
+        if (path.endsWith("/draft")) return {};
         throw new Error(`Unexpected PUT ${path}`);
       }),
       post: vi.fn(async (path: string) => {
@@ -366,6 +368,7 @@ beforeEach(() => {
   summary.last_run = null;
   summary.unfinished_runs = [];
   vi.mocked(api.post).mockClear();
+  vi.mocked(api.put).mockClear();
 });
 
 describe("ReviewPage", () => {
@@ -651,6 +654,128 @@ describe("ReviewPage", () => {
         { draft: {} },
       ),
     );
+  });
+
+  describe("an edit that is kept for later", () => {
+    afterEach(() => vi.useRealTimers());
+    const nameSuggestion: ReviewSuggestion = {
+      ...categorySuggestion, id: "suggestion-name", type: "name", action_kind: "apply_name",
+      title: "Tidy the name of cordless drill", category_id: null,
+      before: { name: "cordless drill" }, after: { name: "Cordless drill" }, evidence: {},
+    };
+    const draftPath = "/inventory-review/suggestions/suggestion-name/draft";
+    const note = "Your corrections are not saved yet. Trying again.";
+    const pass = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+    const card = () => screen.getByText("Tidy the name of cordless drill").closest("li")!;
+    const keep = (value: string) => {
+      fireEvent.click(within(card()).getByRole("button", { name: "Edit first" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Proposed name" }), { target: { value } });
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep for later" }));
+    };
+    const drafts = () => vi.mocked(api.put).mock.calls.filter(([path]) => path === draftPath);
+    const load = (kept?: string) => {
+      suggestions = [{ ...nameSuggestion, evidence: kept ? { review_draft: { name: kept } } : {} }];
+      renderPage();
+      vi.useFakeTimers();
+    };
+
+    it("is kept on the server a short moment later, without Skip or Apply, and a reload shows it", async () => {
+      load();
+      // Typing is not sent. Only the edit that was kept is, once, a short moment later.
+      fireEvent.click(within(card()).getByRole("button", { name: "Edit first" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Proposed name" }), { target: { value: "Cordless" } });
+      await pass(2000);
+      expect(drafts()).toHaveLength(0);
+      fireEvent.change(screen.getByRole("textbox", { name: "Proposed name" }), { target: { value: "Cordless drill 18V" } });
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep for later" }));
+      await pass(599);
+      expect(drafts()).toHaveLength(0);
+      await pass(1);
+      expect(drafts()).toEqual([[draftPath, { draft: { name: "Cordless drill 18V" } }, undefined]]);
+      // Nothing was decided: no Skip and no Apply was sent, and the row is still there.
+      expect(api.post).not.toHaveBeenCalled();
+      expect(within(card()).getByText("Cordless drill 18V").closest("li")).toHaveTextContent("Your edit: Cordless drill 18V");
+      // Opening the edit again and keeping the same value sends nothing.
+      keep("Cordless drill 18V");
+      await pass(2000);
+      expect(drafts()).toHaveLength(1);
+
+      // A reload has only what the server kept.
+      cleanup();
+      vi.useRealTimers();
+      vi.mocked(api.put).mockClear();
+      load("Cordless drill 18V");
+      expect(within(card()).getByText("Cordless drill 18V").closest("li")).toHaveTextContent("Your edit: Cordless drill 18V");
+      await pass(2000);
+      expect(drafts()).toHaveLength(0);
+      // The row's own button applies the edit, not the first proposal.
+      fireEvent.click(within(card()).getByRole("button", { name: "Apply change" }));
+      await pass(0);
+      expect(api.post).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-name/accept", { name: "Cordless drill 18V" },
+      );
+    });
+
+    it("tells the server to forget the edit when the proposal is put back", async () => {
+      load("Cordless drill 18V");
+      keep("Cordless drill");
+      await pass(600);
+      expect(drafts()).toEqual([[draftPath, { draft: {} }, undefined]]);
+      expect(within(card()).queryByText(/Your edit/)).toBeNull();
+    });
+
+    it("is sent at once when the page is hidden and when the review goes away", async () => {
+      load();
+      keep("Cordless drill 18V");
+      window.dispatchEvent(new Event("pagehide"));
+      expect(drafts()).toEqual([[draftPath, { draft: { name: "Cordless drill 18V" } }, { keepalive: true }]]);
+      keep("Cordless drill 20V");
+      cleanup();
+      expect(drafts()).toHaveLength(2);
+      expect(drafts()[1]).toEqual([draftPath, { draft: { name: "Cordless drill 20V" } }, { keepalive: true }]);
+    });
+
+    it("says quietly when it could not be kept, tries again, and never blocks Apply or Skip", async () => {
+      load();
+      vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+      keep("Cordless drill 18V");
+      await pass(600);
+      expect(screen.getByText(note)).toHaveAttribute("role", "status");
+      expect(within(card()).getByText("Cordless drill 18V")).toBeVisible();
+      expect(within(card()).getByRole("button", { name: "Apply change" })).toBeEnabled();
+      expect(within(card()).getByRole("button", { name: "Skip" })).toBeEnabled();
+      await pass(5000);
+      expect(drafts()).toHaveLength(2);
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+    });
+
+    it("goes with Apply and with the bulk action, and a waiting save does no harm", async () => {
+      load();
+      keep("Cordless drill 18V");
+      fireEvent.click(within(card()).getByRole("button", { name: "Apply change" }));
+      await pass(0);
+      expect(api.post).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-name/accept", { name: "Cordless drill 18V" },
+      );
+      await pass(5000);
+      expect(drafts()).toHaveLength(0);
+
+      // The bulk action applies a selected suggestion with its kept edit as well.
+      cleanup();
+      vi.useRealTimers();
+      vi.mocked(api.post).mockClear();
+      load("Cordless drill 18V");
+      vi.mocked(api.post).mockResolvedValueOnce({
+        applied_count: 1, skipped_count: 0, stale_count: 0, unsupported_count: 0,
+        results: [{ suggestion_id: "suggestion-name", status: "applied", message: "Applied." }],
+      });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select Tidy the name of cordless drill" }));
+      fireEvent.click(screen.getByRole("button", { name: "Apply 1 selected change" }));
+      await pass(0);
+      expect(api.post).toHaveBeenCalledWith("/inventory-review/suggestions/bulk-accept", {
+        suggestion_ids: ["suggestion-name"], edits: { "suggestion-name": { name: "Cordless drill 18V" } },
+      });
+    });
   });
 
   it("keeps duplicate findings advisory and opens a comparison", async () => {

@@ -146,7 +146,7 @@ class ExtractionApplySummary(BaseModel):
 class ExtractionLineState(BaseModel):
     """What happened to one extracted line. A line without a state is still pending."""
 
-    # "pending" is a restored line: it waits again, and its saved draft is still here.
+    # "pending" is a line that waits and has a kept draft: it was corrected, or restored.
     status: Literal["applied", "skipped", "pending"]
     action: Literal["create", "update", "link"] | None = None
     item: ItemReference | None = None

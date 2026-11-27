@@ -35,7 +35,7 @@ export function StickySaveBar({
       aria-label="Unsaved changes"
       data-testid="sticky-save-bar"
       className={cn(
-        "glass sticky z-30 mt-6 flex items-center justify-between gap-3 rounded-2xl border border-border/70 px-4 py-2.5 shadow-lg",
+        "glass sticky z-30 mt-6 flex items-center justify-between gap-3 rounded-2xl border border-border/70 px-4 py-2.5 shadow-lg [[data-keyboard-tiny]_&]:static",
         "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px)+0.5rem)]",
         className,
       )}

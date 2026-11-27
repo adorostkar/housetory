@@ -48,7 +48,7 @@ export function BottomBar({
         "z-40 border-t border-border/70 bg-background/95 backdrop-blur-xl",
         compact
           ? "fixed inset-x-0 bottom-[var(--keyboard-inset,0px)] px-2 pt-2"
-          : "sticky bottom-0 px-12 pb-4 pt-3",
+          : "sticky bottom-[var(--keyboard-inset,0px)] px-12 pb-4 pt-3",
         compact && (keyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]"),
         hidden && "hidden",
       )}

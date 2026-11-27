@@ -221,6 +221,27 @@ class ImportProposedInput(ProposedItem):
     pass
 
 
+# The proposal fields a person can change on a row. The draft names the ones that were
+# changed by hand, so that accepting newer suggestions later does not undo them.
+EDITABLE_PROPOSAL_FIELDS = Literal[
+    "name",
+    "description",
+    "quantity",
+    "category",
+    "brand",
+    "model",
+    "serial_number",
+    "room",
+    "storage_location",
+    "purchase",
+    "warranty",
+    "tags",
+    "notes",
+    "collection",
+    "relationships",
+]
+
+
 class ImportApplyEntry(BaseModel):
     id: uuid.UUID
     action: Literal["import", "skip", "reject", "merge"]
@@ -247,6 +268,54 @@ class ImportApplyEntry(BaseModel):
             "notes",
         ]
     ] = Field(default_factory=list)
+    # The fields that were changed by hand, when the review knows them. They are kept
+    # with a skipped row. Without them, the ones that were kept before stay.
+    edited_fields: list[EDITABLE_PROPOSAL_FIELDS] | None = Field(default=None, max_length=15)
+
+
+# A proposal has two open maps. This is the bound for a whole stored row draft.
+MAX_ROW_DRAFT_CHARS = 60_000
+
+
+class ImportEntryDraftRequest(BaseModel):
+    """The corrections of a row that still waits: the edited proposal and the choices.
+
+    Nothing is decided by it. An empty body forgets the choices that were kept.
+    """
+
+    action: Literal["import", "merge"] = "import"
+    entity_type: Literal["item", "room", "container", "location"] | None = None
+    parent_entry_id: uuid.UUID | None = None
+    legacy_identifier: trimmed(0, 120) | None = None
+    allow_duplicate: bool = False
+    proposed: ImportProposedInput | None = None
+    merge_item_id: uuid.UUID | None = None
+    merge_fields: list[
+        Literal[
+            "name",
+            "description",
+            "brand",
+            "model",
+            "serial_number",
+            "quantity",
+            "category",
+            "room",
+            "storage_location",
+            "purchase",
+            "warranty",
+            "tags",
+            "notes",
+        ]
+    ] = Field(default_factory=list, max_length=13)
+    edited_fields: list[EDITABLE_PROPOSAL_FIELDS] = Field(default_factory=list, max_length=15)
+
+    @model_validator(mode="after")
+    def _bounded(self) -> "ImportEntryDraftRequest":
+        if self.proposed is not None and (
+            len(self.proposed.model_dump_json()) > MAX_ROW_DRAFT_CHARS
+        ):
+            raise ValueError("The row draft is too large to keep.")
+        return self
 
 
 class ImportApplyRequest(BaseModel):

@@ -1,14 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup as cleanupRender, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup as cleanupRender, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
 import { BarEditorBoundary } from "@/components/shell/bar-editor";
 import { DocumentProcessingStatus } from "@/components/document-processing-status";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import type {
   AiStatus,
@@ -227,7 +227,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    api: { ...actual.api, get: vi.fn(), post: vi.fn() },
+    api: { ...actual.api, get: vi.fn(), post: vi.fn(), put: vi.fn() },
   };
 });
 
@@ -260,6 +260,8 @@ beforeEach(() => {
   vi.mocked(toast.message).mockClear();
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
+  vi.mocked(api.put).mockReset();
+  vi.mocked(api.put).mockResolvedValue({ line_states: {}, applied_version: null });
   vi.mocked(api.get).mockResolvedValue(review);
   vi.mocked(api.post).mockImplementation(async (path) => {
     if (path.endsWith("/extraction/matches")) {
@@ -1075,6 +1077,207 @@ describe("DocumentExtractionReview", () => {
     expect(within(again).getByRole("button", { name: "Apply changes" })).toBeEnabled();
     expect(within(again).getByText("Drill, serviced")).toBeVisible();
   });
+  describe("kept corrections", () => {
+    afterEach(() => vi.useRealTimers());
+    const draftPath = (id: string) => `/documents/${document.id}/extraction/lines/${id}/draft`;
+    const pass = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+    const line = (name: string) => screen.getByRole("article", { name });
+    const note = "Your corrections are not saved yet. Trying again.";
+    let extraction: ExtractionReview & { line_states?: Record<string, object>; applied_version?: string | null };
+    // Like the server: the draft of a waiting line is kept with the line, which stays pending.
+    beforeEach(() => {
+      extraction = twoLines;
+      vi.mocked(api.get).mockImplementation(async () => extraction);
+      vi.mocked(api.put).mockImplementation(async (path, body) => {
+        const id = path.split("/").at(-2)!;
+        extraction = { ...extraction, line_states: {
+          ...extraction.line_states, [id]: { status: "pending", ...(body as object) },
+        } };
+        return { line_states: extraction.line_states, applied_version: null };
+      });
+    });
+    // The review is loaded with real time; the clock is held only for the corrections.
+    const load = async () => {
+      const view = await renderReview(undefined, true, undefined, false, false);
+      vi.useFakeTimers();
+      return view;
+    };
+    const correctBits = () => {
+      const bits = line("Drill Bit Set");
+      fireEvent.click(within(bits).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(bits).getByLabelText("Destination room"), { target: { value: "room-1" } });
+      fireEvent.change(within(bits).getByLabelText(/^Brand/), { target: { value: "Bosch" } });
+      fireEvent.change(within(bits).getByLabelText(/^Line total/), { target: { value: "19.90" } });
+    };
+
+    it("keeps the whole draft of a waiting line a short moment after its last change, in one request", async () => {
+      await load();
+      await pass(2000);
+      // Nothing is sent for lines that were not touched.
+      expect(api.put).not.toHaveBeenCalled();
+      correctBits();
+      await pass(599);
+      expect(api.put).not.toHaveBeenCalled();
+      await pass(1);
+      expect(api.put).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.put).mock.calls[0]).toEqual([draftPath("line-2"), {
+        description: "Drill Bit Set", quantity: 1, line_total_cents: 1990,
+        draft: expect.objectContaining({
+          action: "create", lineTotal: "19.90",
+          newItem: expect.objectContaining({ name: "Drill Bit Set", roomId: "room-1", brand: "Bosch" }),
+        }),
+      }, undefined]);
+      // The line still waits, is not selected, its editor is still open, and nothing was applied.
+      expect(within(line("Drill Bit Set")).getByLabelText("Destination room")).toHaveValue("room-1");
+      expect(within(line("Drill Bit Set")).getByRole("checkbox", { name: /^Select line/ })).not.toBeChecked();
+      expect(api.post).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+
+      // Selecting a line is not a correction.
+      fireEvent.click(within(line("Drill Bit Set")).getByRole("checkbox", { name: /^Select line/ }));
+      await pass(2000);
+      expect(api.put).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the action and its target, and a reload shows the line as it was corrected", async () => {
+      const view = await load();
+      const drill = line("Cordless Drill");
+      fireEvent.click(within(drill).getByRole("button", { name: "Edit" }));
+      fireEvent.click(within(drill).getByRole("button", { name: "Update details" }));
+      fireEvent.change(within(drill).getByLabelText(/^Name\s*Optional$/), { target: { value: "Drill, serviced" } });
+      fireEvent.click(within(drill).getByRole("checkbox", { name: /Add this quantity as new stock/ }));
+      correctBits();
+      await pass(600);
+      expect(vi.mocked(api.put).mock.calls.map((call) => call[0]).sort()).toEqual([draftPath("line-1"), draftPath("line-2")]);
+      const drillDraft = vi.mocked(api.put).mock.calls.find((call) => call[0] === draftPath("line-1"))![1];
+      expect(drillDraft).toEqual(expect.objectContaining({ draft: expect.objectContaining({
+        action: "update", itemId: "item-1", addQuantity: true,
+        updates: expect.objectContaining({ name: "Drill, serviced" }),
+        candidate: expect.objectContaining({ id: "item-1", name: "Cordless Drill" }),
+      }) }));
+
+      // A reload has only what the server kept. The item is no longer among the matches,
+      // and the place that was chosen at capture does not replace the kept one.
+      view.unmount();
+      vi.useRealTimers();
+      cleanupRender();
+      vi.mocked(api.put).mockClear();
+      extraction = { ...extraction, matches: [] };
+      await renderReview(undefined, true, {
+        documentId: document.id, roomId: "", locationId: "",
+      }, false, false);
+      const reloaded = line("Cordless Drill");
+      expect(within(reloaded).getByRole("button", { name: "Apply changes" })).toBeEnabled();
+      expect(within(reloaded).getByText("Drill, serviced").closest("li")).toHaveTextContent(
+        /Name: Cordless Drill.*Drill, serviced/,
+      );
+      expect(within(reloaded).getByText("+2").closest("li")).toHaveTextContent("Stock: +2");
+      const bits = line("Drill Bit Set");
+      expect(within(bits).getByText("19.90")).toBeVisible();
+      expect(within(bits).getByText("Office")).toBeVisible();
+      for (const box of screen.getAllByRole("checkbox", { name: /^Select line/ })) expect(box).not.toBeChecked();
+      // What was loaded is what the server has: nothing is sent again.
+      vi.useFakeTimers();
+      await pass(2000);
+      expect(api.put).not.toHaveBeenCalled();
+      // The row's own button does what was chosen before the reload.
+      fireEvent.click(within(reloaded).getByRole("button", { name: "Apply changes" }));
+      await pass(0);
+      expect(applyCalls()[0]![1]).toEqual(expect.objectContaining({ lines: [expect.objectContaining({
+        line_id: "line-1", action: "update", item_id: "item-1", add_quantity: true,
+        updates: expect.objectContaining({ name: "Drill, serviced" }),
+      })] }));
+    });
+
+    it("shows the corrections when the document is opened again before the server has answered", async () => {
+      const client = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+      const view = await renderReview(client, true, undefined, false, false);
+      vi.useFakeTimers();
+      // The save is on its way and has not come back.
+      vi.mocked(api.put).mockImplementation(() => new Promise(() => undefined));
+      correctBits();
+      await pass(600);
+      expect(api.put).toHaveBeenCalledTimes(1);
+      view.unmount();
+      vi.useRealTimers();
+      cleanupRender();
+      await renderReview(client, true, undefined, false, false);
+      const bits = line("Drill Bit Set");
+      expect(within(bits).getByText("19.90")).toBeVisible();
+      expect(within(bits).getByText("Office")).toBeVisible();
+    });
+
+    it("sends what still waits when the page is hidden and when the review goes away", async () => {
+      const view = await load();
+      correctBits();
+      window.dispatchEvent(new Event("pagehide"));
+      expect(api.put).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.put).mock.calls[0]![2]).toEqual({ keepalive: true });
+      fireEvent.change(within(line("Drill Bit Set")).getByLabelText(/^Line total/), { target: { value: "21" } });
+      view.unmount();
+      expect(api.put).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(api.put).mock.calls[1]).toEqual([
+        draftPath("line-2"), expect.objectContaining({ line_total_cents: 2100 }), { keepalive: true },
+      ]);
+    });
+
+    it("says quietly when a correction could not be kept, tries again, and never blocks the row", async () => {
+      await load();
+      vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+      correctBits();
+      await pass(600);
+      expect(screen.getByText(note)).toHaveAttribute("role", "status");
+      expect(within(line("Drill Bit Set")).getByLabelText(/^Brand/)).toHaveValue("Bosch");
+      expect(within(line("Drill Bit Set")).getByRole("button", { name: "Add item" })).toBeEnabled();
+      expect(within(line("Drill Bit Set")).getByRole("button", { name: "Skip" })).toBeEnabled();
+      expect(toast.error).not.toHaveBeenCalled();
+      await pass(5000);
+      expect(api.put).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+    });
+
+    it("applies a line right after a correction with the corrected values, and the waiting draft does no harm", async () => {
+      vi.mocked(api.post).mockImplementation(async (path) => {
+        if (path.endsWith("/extraction/apply")) {
+          extraction = { ...extraction, applied_version: "version-1", line_states: {
+            ...extraction.line_states, "line-2": { status: "applied", action: "create", item: { id: "item-7", name: "Drill Bit Set" } },
+          } };
+        }
+        return applied;
+      });
+      await load();
+      correctBits();
+      fireEvent.click(within(line("Drill Bit Set")).getByRole("button", { name: "Add item" }));
+      await pass(0);
+      expect(applyCalls()).toHaveLength(1);
+      expect(applyCalls()[0]![1]).toEqual(expect.objectContaining({ lines: [expect.objectContaining({
+        line_id: "line-2", action: "create", line_total_cents: 1990,
+        new_item: expect.objectContaining({ room_id: "room-1", brand: "Bosch" }),
+      })] }));
+      await pass(5000);
+      expect(api.put).not.toHaveBeenCalled();
+
+      // A draft that was on its way when the line was skipped gets 409 and is ignored.
+      let refuse!: (error: unknown) => void;
+      vi.mocked(api.put).mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+      const drill = line("Cordless Drill");
+      fireEvent.click(within(drill).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(drill).getByLabelText(/^Line total/), { target: { value: "140.5" } });
+      await pass(600);
+      expect(api.put).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(drill).getByRole("button", { name: "Skip" }));
+      await pass(0);
+      refuse(new ApiError(409, "extraction_line_skipped", "This line is skipped."));
+      await pass(5000);
+      const skip = vi.mocked(api.post).mock.calls.find(([path]) => path.endsWith("/lines/line-1/skip"))!;
+      expect(skip[1]).toEqual(expect.objectContaining({ line_total_cents: 14050 }));
+      expect(api.put).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+  });
+
   it("changes a tapped value of a closed line through the bar, with the same checks", async () => {
     vi.mocked(api.get).mockResolvedValue(twoLines);
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });

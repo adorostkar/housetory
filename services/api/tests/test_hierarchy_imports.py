@@ -365,3 +365,130 @@ def test_hierarchy_skip_reload_restore_keeps_edits_type_parent_and_duplicate_cho
         if entry["legacy_identifier"] == "STO-02"
     )
     assert item["location"]["id"] == sto02_location["id"]
+
+
+def test_hierarchy_draft_of_a_waiting_row_keeps_edits_kinds_parent_and_duplicate_choice(
+    owner_client,
+):
+    batch = upload_markdown(owner_client)
+    detail = process(owner_client, batch["id"])
+    entries = detail["entries"]
+    sto02 = next(entry for entry in entries if entry["legacy_identifier"] == "STO-02")
+    ethernet = next(entry for entry in entries if entry["proposed"]["name"] == "Ethernet cables")
+    batch_url = f"/api/v1/imports/{batch['id']}"
+
+    def draft_url(entry):
+        return f"{batch_url}/entries/{entry['id']}/draft"
+
+    def fetch(entry):
+        fetched = owner_client.get(batch_url).json()
+        return fetched, next(row for row in fetched["entries"] if row["id"] == entry["id"])
+
+    edited = {
+        **ethernet["proposed"],
+        "name": "Long Ethernet cable",
+        "quantity": 8,
+        "description": "Cat 6, grey",
+    }
+    choice = {
+        "action": "import",
+        "entity_type": "item",
+        "parent_entry_id": sto02["id"],
+        "legacy_identifier": "CAB-1",
+        "allow_duplicate": True,
+    }
+    # A parent that is not a row of this import is refused, and nothing is stored.
+    stranger = "00000000-0000-4000-8000-000000000000"
+    refused = owner_client.put(
+        draft_url(ethernet), json={**choice, "parent_entry_id": stranger, "proposed": edited}
+    )
+    assert refused.status_code == 422, refused.text
+    assert fetch(ethernet)[1] == ethernet
+
+    saved = owner_client.put(draft_url(ethernet), json={**choice, "proposed": edited})
+    assert saved.status_code == 200, saved.text
+    # The kind of a container is part of its proposal; the kind of record is a choice.
+    container = {
+        **sto02["proposed"],
+        "name": "Storage box two",
+        "relationships": {**sto02["proposed"]["relationships"], "container_type": "crate"},
+    }
+    saved = owner_client.put(
+        draft_url(sto02), json={"entity_type": "location", "proposed": container}
+    )
+    assert saved.status_code == 200, saved.text
+
+    after, row = fetch(ethernet)
+    assert after["status"] == detail["status"]
+    assert after["imported_entries"] == detail["imported_entries"]
+    assert {entry["status"] for entry in after["entries"]} == {"proposed"}
+    # The row itself is not changed: its kind and parent are still only a draft.
+    assert (row["status"], row["entity_type"], row["parent_entry_id"]) == (
+        "proposed",
+        ethernet["entity_type"],
+        ethernet["parent_entry_id"],
+    )
+    for key in ("name", "quantity", "description"):
+        assert row["proposed"][key] == edited[key]
+    draft = row["proposed"]["relationships"]["review_draft"]
+    assert draft == {**choice, "merge_item_id": None, "merge_fields": []}
+    stored_container = fetch(sto02)[1]["proposed"]
+    assert stored_container["name"] == "Storage box two"
+    assert stored_container["relationships"]["container_type"] == "crate"
+    assert stored_container["relationships"]["review_draft"]["entity_type"] == "location"
+    assert sto02["entity_type"] == "container"
+    # An empty draft puts the row back as it was read. The last draft that is kept
+    # says it is a container again, with the corrected name and kind.
+    assert owner_client.put(draft_url(sto02), json={}).json()["proposed"] == sto02["proposed"]
+    saved = owner_client.put(
+        draft_url(sto02), json={"entity_type": "container", "proposed": container}
+    )
+    assert saved.status_code == 200, saved.text
+
+    branch = [sto02] + [
+        entry
+        for entry in entries
+        if entry["entity_type"] == "room"
+        and entry["proposed"]["name"] in {"Storage", "Storage room 2"}
+    ]
+    applied = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {
+                    "id": entry["id"],
+                    "action": "import",
+                    "entity_type": entry["entity_type"],
+                    "parent_entry_id": entry["parent_entry_id"],
+                }
+                for entry in branch
+            ]
+            + [
+                {
+                    "id": ethernet["id"],
+                    "action": "import",
+                    "entity_type": draft["entity_type"],
+                    "parent_entry_id": draft["parent_entry_id"],
+                    "allow_duplicate": draft["allow_duplicate"],
+                }
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["failed"] == 0, applied.json()
+    item = next(
+        entry
+        for entry in owner_client.get("/api/v1/items?limit=100").json()["items"]
+        if entry["name"] == "Long Ethernet cable"
+    )
+    assert item["quantity"] == 8
+    box = next(
+        entry
+        for entry in owner_client.get("/api/v1/containers?limit=200").json()["items"]
+        if entry["legacy_identifier"] == "STO-02"
+    )
+    assert box["name"] == "Storage box two"
+    assert item["location"]["id"] == box["id"]
+    late = owner_client.put(draft_url(ethernet), json={**choice, "proposed": edited})
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "import_entry_not_pending"

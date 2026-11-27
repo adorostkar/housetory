@@ -44,6 +44,7 @@ from .candidates import (
 from .decisions import accept_suggestion as accept_suggestion
 from .decisions import bulk_accept as bulk_accept
 from .decisions import dismiss_suggestion as dismiss_suggestion
+from .decisions import save_suggestion_draft as save_suggestion_draft
 from .decisions import undo_suggestion as undo_suggestion
 from .scope import (
     MAX_ADVISORY_SUGGESTIONS,
@@ -613,6 +614,7 @@ __all__ = [
     "list_suggestions",
     "review_summary",
     "run_review",
+    "save_suggestion_draft",
     "scope_items",
     "serialize_suggestion",
     "undo_suggestion",

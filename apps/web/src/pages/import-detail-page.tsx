@@ -56,10 +56,83 @@ import type {
   Room,
   StorageLocation,
 } from "@/lib/types";
+import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
 import { formatDate, pluralize } from "@/lib/utils";
 import { enhancementLabel, keepManualEdits, proposalValue } from "@/lib/enrichment";
 
-/** The review choices the server kept with a skipped row (see `review_draft`). */
+/** The fields of a proposal that a person can change. */
+const EDITABLE_FIELDS = [
+  "name", "description", "quantity", "category", "brand", "model", "serial_number", "room",
+  "storage_location", "purchase", "warranty", "tags", "notes", "collection", "relationships",
+] as const satisfies ReadonlyArray<keyof ProposedItem>;
+type EditableField = (typeof EDITABLE_FIELDS)[number];
+
+/** A row that still waits for a decision. Only such a row has a draft to keep. */
+const waits = (entry: ImportEntry) =>
+  entry.status === "proposed" || entry.status === "approved" || entry.status === "failed";
+
+function withoutReviewDraft(proposed: ProposedItem): ProposedItem {
+  if (!proposed.relationships || !("review_draft" in proposed.relationships)) return proposed;
+  const relationships = { ...proposed.relationships };
+  delete relationships.review_draft;
+  return { ...proposed, relationships };
+}
+
+/** The fields the server knows were changed by hand, from an earlier visit. */
+function keptEditedFields(entry: ImportEntry): EditableField[] {
+  const draft = entry.proposed.relationships?.review_draft as { edited_fields?: unknown } | undefined;
+  const kept = Array.isArray(draft?.edited_fields) ? draft.edited_fields : [];
+  return EDITABLE_FIELDS.filter((field) => kept.includes(field));
+}
+
+/** The fields that were changed by hand: the kept ones, and the ones that differ now. */
+function editedFields(loaded: ProposedItem, kept: EditableField[], current: ProposedItem) {
+  const before = withoutReviewDraft(loaded);
+  const now = withoutReviewDraft(current);
+  return EDITABLE_FIELDS.filter((field) =>
+    kept.includes(field) ||
+    JSON.stringify(now[field] ?? null) !== JSON.stringify(before[field] ?? null));
+}
+
+/**
+ * The whole draft of a waiting row, as the server keeps it: the edited proposal and
+ * the choices of the row. Selection is not part of it.
+ */
+function importDraftBody(
+  entry: ImportEntry,
+  proposed: ProposedItem,
+  decision: ImportDecision,
+  hierarchy: boolean,
+  edited: EditableField[],
+) {
+  const clean = withoutReviewDraft(proposed);
+  return {
+    action: decision.action === "merge" ? "merge" : "import",
+    // A name or a quantity that cannot be kept as it is now (empty, or not a whole
+    // number) is kept as it was. The field on the page is not changed by this.
+    proposed: {
+      ...clean,
+      name: clean.name.trim() ? clean.name : entry.proposed.name,
+      quantity: Number.isInteger(clean.quantity) && clean.quantity >= 0
+        ? clean.quantity : entry.proposed.quantity,
+    },
+    merge_item_id: decision.mergeItemId || null,
+    merge_fields: decision.mergeFields,
+    ...(hierarchy
+      ? {
+          entity_type: decision.entityType ?? (entry.entity_type as ImportDecision["entityType"]) ?? "item",
+          parent_entry_id: decision.parentEntryId !== undefined
+            ? decision.parentEntryId : (entry.parent_entry_id ?? null),
+          legacy_identifier: decision.legacyIdentifier !== undefined
+            ? decision.legacyIdentifier : (entry.legacy_identifier ?? null),
+          allow_duplicate: Boolean(decision.allowDuplicate),
+        }
+      : {}),
+    edited_fields: edited,
+  };
+}
+
+/** The review choices the server kept with a row (see `review_draft`). */
 function reviewDraftOf(entry: ImportEntry): Partial<ImportDecision> {
   const draft = entry.proposed.relationships?.review_draft as {
     action?: string;
@@ -109,6 +182,21 @@ export function ImportDetailPage({
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
   // The finding that is pointed at, from its row or from its pin on the photo.
   const [activeFinding, setActiveFinding] = React.useState<string | null>(null);
+  // Corrections of waiting rows are kept on the server by themselves. These hold what
+  // the server has for each row as far as this page knows, the state that was last
+  // compared, and each proposal as it was loaded.
+  const autosave = useDraftAutosave();
+  const savedDrafts = React.useRef(new Map<string, string>());
+  const comparedDrafts = React.useRef(
+    new Map<string, { proposed: ProposedItem; decision: ImportDecision }>(),
+  );
+  const loadedDrafts = React.useRef(
+    new Map<string, { proposed: ProposedItem; edited: EditableField[] }>(),
+  );
+  // Rows whose decision is on its way, and rows that were decided here. Neither has a
+  // draft to keep: the decision carried it.
+  const decidingRows = React.useRef(new Set<string>());
+  const decidedRows = React.useRef(new Set<string>());
 
   React.useEffect(() => {
     setSummary(null);
@@ -125,15 +213,36 @@ export function ImportDetailPage({
       if (!(entry.id in nextEdits)) nextEdits[entry.id] = entry.proposed;
     }
     const nextDecisions = { ...(savedDraft?.decisions ?? {}) };
-    const duplicateThreshold = batch.metadata.hierarchy === true ? 55 : 70;
+    const hierarchy = batch.metadata.hierarchy === true;
+    const duplicateThreshold = hierarchy ? 55 : 70;
+    comparedDrafts.current = new Map();
     for (const entry of batch.entries) {
       const highDuplicate = entry.duplicate_candidates.find(
         (candidate) => candidate.score >= duplicateThreshold,
       );
       const done = entry.status === "imported" || entry.status === "merged";
       const skippedNow = entry.status === "skipped" || entry.status === "rejected";
-      // The choices that were kept with a skipped row: what to do, and with which target.
+      // The choices that were kept with the row: what to do, and with which target.
+      // They come back for a skipped row and for a row that still waits.
       const kept = reviewDraftOf(entry);
+      const keptFields = keptEditedFields(entry);
+      // The proposal as this page saw it first. What is changed by hand is told from it.
+      if (!loadedDrafts.current.has(entry.id)) {
+        loadedDrafts.current.set(entry.id, { proposed: entry.proposed, edited: keptFields });
+      }
+      if (waits(entry) && !savedDrafts.current.has(entry.id)) {
+        // What the server holds for this row, the first time this page sees it. A
+        // draft of this page that says something else (it was made here) is sent.
+        // Later, only a row that was changed here since its last save is sent, so
+        // that a row another tab corrected in the meantime is not overwritten.
+        savedDrafts.current.set(entry.id, JSON.stringify(importDraftBody(entry, entry.proposed, {
+          include: false,
+          action: "import",
+          mergeItemId: highDuplicate?.item_id ?? "",
+          mergeFields: highDuplicate ? ["serial_number"] : [],
+          ...kept,
+        }, hierarchy, keptFields)));
+      }
       if (done) {
         nextDecisions[entry.id] = {
           include: false,
@@ -176,6 +285,33 @@ export function ImportDetailPage({
     saveImportReviewDraft(batchId, { edits, decisions });
   }, [batch, batchId, decisions, edits, initialized, saveImportReviewDraft]);
 
+  // Keeps the corrections of waiting rows on the server, a short moment after the
+  // last change of a row. Only a row whose draft differs from what the server has is
+  // sent, with its whole draft. A row that is being added or skipped right now is
+  // left alone: that request carries the draft itself.
+  const saveDraft = autosave.save;
+  React.useEffect(() => {
+    if (!initialized || !batch || batch.id !== batchId || batch.status !== "review") return;
+    const hierarchy = batch.metadata.hierarchy === true;
+    for (const entry of batch.entries) {
+      if (!waits(entry) || pendingIds.has(entry.id)) continue;
+      if (decidingRows.current.has(entry.id) || decidedRows.current.has(entry.id)) continue;
+      const proposed = edits[entry.id];
+      const decision = decisions[entry.id];
+      if (!proposed || !decision) continue;
+      const compared = comparedDrafts.current.get(entry.id);
+      if (compared && compared.proposed === proposed && compared.decision === decision) continue;
+      comparedDrafts.current.set(entry.id, { proposed, decision });
+      const loaded = loadedDrafts.current.get(entry.id);
+      const body = importDraftBody(entry, proposed, decision, hierarchy,
+        editedFields(loaded?.proposed ?? entry.proposed, loaded?.edited ?? [], proposed));
+      const text = JSON.stringify(body);
+      if (savedDrafts.current.get(entry.id) === text) continue;
+      savedDrafts.current.set(entry.id, text);
+      saveDraft(entry.id, { path: `/imports/${batchId}/entries/${entry.id}/draft`, body });
+    }
+  }, [batch, batchId, decisions, edits, initialized, pendingIds, saveDraft]);
+
   const retry = useMutation({
     mutationFn: () => api.post(`/imports/${batchId}/retry`),
     onSuccess: () => {
@@ -203,20 +339,33 @@ export function ImportDetailPage({
   });
 
   const acceptEnhancement = useMutation({
-    mutationFn: async () => ({
-      before: batch,
-      after: await api.post<ImportBatchDetail>(`/imports/${batchId}/enhancement/accept`),
-    }),
+    mutationFn: async () => {
+      // The server puts the suggestions under the corrections it has kept. So the
+      // corrections that still wait are sent first.
+      await autosave.settle();
+      return {
+        before: batch,
+        after: await api.post<ImportBatchDetail>(`/imports/${batchId}/enhancement/accept`),
+      };
+    },
     onSuccess: ({ before, after }) => {
       const nextEdits = Object.fromEntries(after.entries.map((entry) => {
         const base = before?.entries.find((item) => item.id === entry.id);
         const edited = edits[entry.id];
-        return [entry.id, base && edited
-          ? keepManualEdits(base.proposed, edited, entry.proposed)
-          : entry.proposed];
+        if (!base || !edited) return [entry.id, entry.proposed];
+        // A field that was corrected in an earlier visit is a manual edit too. After
+        // a reload it no longer differs from what was loaded, so it is named here.
+        const earlier = Object.fromEntries(
+          (loadedDrafts.current.get(entry.id)?.edited ?? []).map((field) => [field, edited[field]]),
+        );
+        return [entry.id, { ...keepManualEdits(base.proposed, edited, entry.proposed), ...earlier }];
       }));
       setEdits(nextEdits);
       saveImportReviewDraft(batchId, { edits: nextEdits, decisions });
+      // The server replaced the proposals. Every row is compared with it again, so
+      // that the manual edits that were kept here are kept there too.
+      savedDrafts.current = new Map();
+      loadedDrafts.current = new Map();
       queryClient.setQueryData(queryKeys.importBatch(batchId), after);
       setInitializedBatchId("");
       toast.success("Suggestions loaded into review. Manual edits were kept; apply is still separate.");
@@ -239,6 +388,11 @@ export function ImportDetailPage({
     const mergeChoice = decision?.action === "merge"
       ? { merge_item_id: decision.mergeItemId || null, merge_fields: decision.mergeFields }
       : {};
+    // A skipped row also keeps which fields were changed by hand.
+    const loaded = loadedDrafts.current.get(id);
+    const manual = forced && edited && entry
+      ? { edited_fields: editedFields(loaded?.proposed ?? entry.proposed, loaded?.edited ?? [], edited) }
+      : {};
     if (action === "merge" && decision) {
       return { id, action, proposed, ...mergeChoice };
     }
@@ -247,6 +401,7 @@ export function ImportDetailPage({
       action,
       proposed,
       ...(forced ? mergeChoice : {}),
+      ...manual,
       ...(hierarchy
         ? {
             entity_type:
@@ -276,13 +431,31 @@ export function ImportDetailPage({
         entries: ids.map((id) => payloadFor(id, forced)),
       });
     },
-    onMutate: ({ ids }) => setPendingIds(new Set(ids)),
-    onSettled: () => setPendingIds(new Set()),
+    onMutate: ({ ids }) => {
+      // This request carries the draft of these rows. A draft that still waits to be
+      // kept is dropped.
+      for (const id of ids) {
+        decidingRows.current.add(id);
+        autosave.cancel(id);
+      }
+      setPendingIds(new Set(ids));
+    },
+    onSettled: (_result, _error, { ids }) => {
+      // A row that was not decided after all (the request failed, or the server could
+      // not add it) is compared again, so that its corrections are kept.
+      for (const id of ids) {
+        decidingRows.current.delete(id);
+        savedDrafts.current.delete(id);
+        comparedDrafts.current.delete(id);
+      }
+      setPendingIds(new Set());
+    },
     onSuccess: (result, { ids, forced }) => {
       const failedIds = new Set(result.failures.map((failure) => failure.entry_id));
       // Rows that were saved leave the selection. Rows that failed stay selected.
       const next = { ...decisions };
       for (const id of ids) {
+        if (!failedIds.has(id)) decidedRows.current.add(id);
         if (!failedIds.has(id) && next[id]) next[id] = { ...next[id]!, include: false };
       }
       setDecisions(next);
@@ -316,7 +489,9 @@ export function ImportDetailPage({
   const restore = useMutation({
     mutationFn: (entryId: string) =>
       api.post<ImportBatchDetail>(`/imports/${batchId}/entries/${entryId}/restore`),
-    onSuccess: (restored) => {
+    onSuccess: (restored, entryId) => {
+      // The row waits again, so its corrections are kept again from now on.
+      decidedRows.current.delete(entryId);
       setInitializedBatchId("");
       queryClient.setQueryData(queryKeys.importBatch(batchId), restored);
       invalidate();
@@ -875,6 +1050,7 @@ export function ImportDetailPage({
             <div className="flex flex-wrap items-center gap-2">{bulkButtons("sm")}</div>
           </div>
           )}
+          <DraftSaveNotice show={autosave.unsaved} className="mt-2 px-1 text-xs text-muted-foreground" />
 
           {hierarchyMode ? (
             <div className="mt-3">

@@ -20,6 +20,8 @@ from ...schemas.imports import (
     ImportBatchDetail,
     ImportBatchList,
     ImportBatchOut,
+    ImportEntryDraftRequest,
+    ImportEntryOut,
 )
 from ...services import properties as property_service
 from ...services import storage
@@ -28,8 +30,10 @@ from ...services.import_pipeline import (
     create_assistant_text_capture,
     enqueue_import,
     restore_import_entry,
+    save_import_entry_draft,
     serialize_batch,
 )
+from ...services.import_pipeline.serialization import serialize_import_entry
 from ...services.import_readers import SUPPORTED_EXTENSIONS
 from ...services.recognition_import import create_batch_from_recognition
 from ..deps import AuthContext, require_auth
@@ -412,6 +416,19 @@ def restore_import_entry_route(
     batch = _get_batch(db, auth.household.id, batch_id)
     batch = restore_import_entry(db, batch, entry_id)
     return serialize_batch(db, _get_batch(db, auth.household.id, batch.id))
+
+
+@router.put("/{batch_id}/entries/{entry_id}/draft", response_model=ImportEntryOut)
+def save_import_entry_draft_route(
+    batch_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    payload: ImportEntryDraftRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportEntryOut:
+    """Keep the corrections of one row that still waits. The row stays as it is."""
+    batch = _get_batch(db, auth.household.id, batch_id)
+    return serialize_import_entry(save_import_entry_draft(db, batch, entry_id, payload))
 
 
 @router.post("/{batch_id}/enhancement/retry", response_model=ImportBatchDetail)

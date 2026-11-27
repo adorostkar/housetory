@@ -24,29 +24,41 @@ from ...schemas.imports import (
     ImportApplyEntry,
     ImportApplyFailure,
     ImportApplyResult,
+    ImportEntryDraftRequest,
     LocationProposal,
     ProposedItem,
 )
 from ...schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from .. import properties as property_service
 from ..containers import create_containers
+from ..import_row_drafts import REVIEW_DRAFT_KEY, first_reading, with_draft
 from ..items import create_item_record, get_item, update_item_record
 from .serialization import _batch_detail, _safe_error, serialize_batch
 
 # The choices of a row that are not part of the proposal itself: what to do with it and
 # with which target. They are kept with a skipped row, inside its proposal, so that the
-# whole draft comes back after a reload and after Restore.
-REVIEW_DRAFT_KEY = "review_draft"
+# whole draft comes back after a reload and after Restore. A row that still waits keeps
+# them the same way, together with its first reading (see ``import_row_drafts``).
 
 
-def _proposed_json(proposed: ProposedItem, request: ImportApplyEntry | None = None) -> dict:
+def _proposed_json(
+    proposed: ProposedItem,
+    request: ImportApplyEntry | ImportEntryDraftRequest | None = None,
+) -> dict:
     """The edited proposal as stored. With ``request`` it also carries the review draft."""
     data = proposed.model_dump(mode="json")
     relationships = dict(data.get("relationships") or {})
-    relationships.pop(REVIEW_DRAFT_KEY, None)
+    kept = relationships.pop(REVIEW_DRAFT_KEY, None)
     if request is not None:
+        # A skip names its target only when the person chose to merge. A draft of a
+        # waiting row says the action itself, and may keep a target that is not chosen yet.
+        action = (
+            request.action
+            if isinstance(request, ImportEntryDraftRequest)
+            else ("merge" if request.merge_item_id else "import")
+        )
         draft: dict[str, Any] = {
-            "action": "merge" if request.merge_item_id else "import",
+            "action": action,
             "merge_item_id": str(request.merge_item_id) if request.merge_item_id else None,
             "merge_fields": list(request.merge_fields),
             "allow_duplicate": request.allow_duplicate,
@@ -59,6 +71,13 @@ def _proposed_json(proposed: ProposedItem, request: ImportApplyEntry | None = No
             )
         if "legacy_identifier" in request.model_fields_set:
             draft["legacy_identifier"] = request.legacy_identifier
+        # The fields that were changed by hand. A request that does not name them
+        # leaves the ones that were kept before.
+        edited = kept.get("edited_fields") if isinstance(kept, dict) else None
+        if request.edited_fields is not None:
+            edited = list(request.edited_fields)
+        if edited:
+            draft["edited_fields"] = edited
         relationships[REVIEW_DRAFT_KEY] = draft
     data["relationships"] = relationships
     return data
@@ -810,6 +829,87 @@ def apply_import(
         failed=failed,
         failures=failures,
     )
+
+
+# A row in one of these states still waits for a decision. A failed row is one: it
+# stays in the review and can be corrected and tried again.
+_WAITING_ENTRY_STATUSES = {
+    ImportEntryStatus.PROPOSED.value,
+    ImportEntryStatus.APPROVED.value,
+    ImportEntryStatus.FAILED.value,
+}
+
+
+def save_import_entry_draft(
+    db: Session, batch: ImportBatch, entry_id: uuid.UUID, request: ImportEntryDraftRequest
+) -> ImportEntry:
+    """Keep the corrections of a row that still waits. Nothing is decided or added.
+
+    The draft is stored where Skip stores it: the edited proposal, with the choices of
+    the row inside it. The proposal as it was read before the first correction is kept
+    with it. That first reading is what optional AI suggestions were made for, so a
+    kept correction does not make them out of date. The status, the error, the counts
+    of the batch and the inventory are not touched. An empty request puts the first
+    reading back. The last write wins.
+    """
+    # The batch is locked first, so that this cannot run in the middle of an apply.
+    batch = db.scalar(
+        select(ImportBatch)
+        .where(ImportBatch.id == batch.id, ImportBatch.household_id == batch.household_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if batch is None:
+        raise ApiError(404, "import_not_found", "Import not found.")
+    if batch.status == ImportStatus.APPLYING.value:
+        raise ApiError(
+            409, "import_busy", "Rows of this import are being added right now. Try again."
+        )
+    entry = db.scalar(
+        select(ImportEntry)
+        .where(ImportEntry.id == entry_id, ImportEntry.batch_id == batch.id)
+        .with_for_update()
+    )
+    if entry is None:
+        raise ApiError(404, "import_entry_not_found", "Import entry not found.")
+    if (
+        batch.status not in {ImportStatus.REVIEW.value, ImportStatus.COMPLETED.value}
+        or entry.status not in _WAITING_ENTRY_STATUSES
+    ):
+        raise ApiError(
+            409,
+            "import_entry_not_pending",
+            "This row is no longer waiting. Its corrections were not kept.",
+        )
+    if (
+        "parent_entry_id" in request.model_fields_set
+        and request.parent_entry_id is not None
+        and (
+            request.parent_entry_id == entry.id
+            or db.scalar(
+                select(ImportEntry.id).where(
+                    ImportEntry.id == request.parent_entry_id,
+                    ImportEntry.batch_id == batch.id,
+                )
+            )
+            is None
+        )
+    ):
+        raise ApiError(422, "import_draft_invalid", "Choose a parent from this import.")
+    # The first reading stays the one that was there before the first correction.
+    base = first_reading(entry.proposed)
+    if not request.model_fields_set:
+        if base is not None:
+            entry.proposed = base
+        db.commit()
+        return entry
+    proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
+    data = _proposed_json(proposed, request)
+    entry.proposed = with_draft(
+        data, data["relationships"][REVIEW_DRAFT_KEY], base or dict(entry.proposed)
+    )
+    db.commit()
+    return entry
 
 
 def restore_import_entry(db: Session, batch: ImportBatch, entry_id: uuid.UUID) -> ImportBatch:

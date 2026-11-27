@@ -46,7 +46,11 @@ const DialogContent = React.forwardRef<
       ref={ref}
       onEscapeKeyDown={(event) => keepOpenForInnerList(event, onEscapeKeyDown)}
       className={cn(
-        "dialog-safe-bottom fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem-env(safe-area-inset-bottom))] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-5 overflow-y-auto overscroll-contain rounded-2xl border border-border/80 bg-popover px-6 pt-6 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-fade-in sm:px-7 sm:pt-7",
+        // Centred in the part of the window that can be seen: with a touch keyboard open that is not the middle of the window.
+        "dialog-safe-bottom fixed left-1/2 top-[calc(var(--visual-viewport-top,0px)+var(--visual-viewport-height,100dvh)/2)] z-50 grid max-h-[calc(var(--visual-viewport-height,100dvh)-2rem-env(safe-area-inset-bottom))] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-5 overflow-y-auto overscroll-contain rounded-2xl border border-border/80 bg-popover px-6 pt-6 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-fade-in sm:px-7 sm:pt-7",
+        // A dialog may set its own largest height. With a touch keyboard open that would
+        // reach outside what is seen, so this cap wins while the keyboard is open.
+        "sm:[[data-keyboard]_&]:max-h-[calc(var(--visual-viewport-height,100dvh)-2rem)]",
         "max-sm:inset-x-0 max-sm:bottom-[var(--keyboard-inset,0px)] max-sm:top-auto max-sm:flex max-sm:max-h-[min(90dvh,calc(var(--visual-viewport-height,100dvh)-0.5rem))] max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:flex-col max-sm:overflow-y-auto max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-b-0 max-sm:pb-0 max-sm:pt-0 max-sm:data-[state=open]:animate-sheet-up",
         className,
       )}

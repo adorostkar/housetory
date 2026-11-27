@@ -37,6 +37,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, ApiError, getApiErrorMessage } from "@/lib/api";
+import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
 import {
   appendOrigin,
   itemOrigin,
@@ -387,7 +388,8 @@ export function InventoryReview({
   });
 
   // An edit that was started under "Edit first" but not applied. It is kept when the
-  // dialog closes, goes to the server with Skip, and comes back with Restore.
+  // dialog closes. The server keeps it too: by itself a short moment later, and with
+  // Skip. It comes back with a reload and with Restore.
   const [editDrafts, setEditDrafts] = React.useState<Record<string, { name?: string; categoryId?: string }>>({});
   const proposedEdit = (suggestion: ReviewSuggestion) => ({
     name: stringField(suggestion.after, "name") ?? "",
@@ -409,6 +411,8 @@ export function InventoryReview({
     draft
       ? { draft: { ...(draft.name ? { name: draft.name } : {}), ...(draft.categoryId ? { category_id: draft.categoryId } : {}) } }
       : {};
+  // An edit that is kept for later is also kept on the server, without Skip or Apply.
+  const autosave = useDraftAutosave();
 
   const applyMutation = useMutation({
     mutationFn: ({
@@ -427,6 +431,8 @@ export function InventoryReview({
           ...(categoryId ? { category_id: categoryId } : {}),
         },
       ),
+    // The decision carries the edit itself. An edit that still waits to be kept is dropped.
+    onMutate: ({ suggestion }) => autosave.cancel(suggestion.id),
     onSuccess: (result, { suggestion }) => {
       invalidateInventory();
       refreshReview();
@@ -451,6 +457,7 @@ export function InventoryReview({
         `/inventory-review/suggestions/${suggestion.id}/dismiss`,
         dismissBody(editDraftFor(suggestion)),
       ),
+    onMutate: (suggestion) => autosave.cancel(suggestion.id),
     onSuccess: (result, suggestion) => {
       refreshReview();
       // Skip is remembered. Undo here, or Restore under Skipped, brings the row back.
@@ -479,11 +486,22 @@ export function InventoryReview({
   });
 
   const bulkAcceptMutation = useMutation({
-    mutationFn: (ids: string[]) =>
-      api.post<ReviewBulkAcceptResult>(
+    mutationFn: (ids: string[]) => {
+      // A selected suggestion that has an "Edit first" edit is applied with that edit.
+      const edits = Object.fromEntries(ids.flatMap((id) => {
+        const suggestion = suggestions.find((entry) => entry.id === id);
+        const draft = suggestion ? editDraftFor(suggestion) : null;
+        const edit = suggestion?.type === "category"
+          ? (draft?.categoryId ? { category_id: draft.categoryId } : null)
+          : (draft?.name ? { name: draft.name } : null);
+        return edit ? [[id, edit]] : [];
+      }));
+      return api.post<ReviewBulkAcceptResult>(
         "/inventory-review/suggestions/bulk-accept",
-        { suggestion_ids: ids },
-      ),
+        { suggestion_ids: ids, ...(Object.keys(edits).length ? { edits } : {}) },
+      );
+    },
+    onMutate: (ids) => ids.forEach((id) => autosave.cancel(id)),
     onSuccess: (result) => {
       invalidateInventory();
       refreshReview();
@@ -609,6 +627,19 @@ export function InventoryReview({
         next[editTarget.id] = changed ?? {};
         return next;
       });
+      // Kept on the server too, so that a reload shows it. An empty draft tells the
+      // server to forget an edit it kept. Nothing is sent when nothing changed.
+      const before = editDraftFor(editTarget) ?? {};
+      const after = changed ?? {};
+      if (canWrite && editTarget.status === "pending" && JSON.stringify(before) !== JSON.stringify(after)) {
+        autosave.save(editTarget.id, {
+          path: `/inventory-review/suggestions/${editTarget.id}/draft`,
+          body: dismissBody(after),
+          // The list is read again, so that it has the kept edit when this review is
+          // opened again. The edit on the page stays as it is.
+          onSaved: () => void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSuggestionsAll }),
+        });
+      }
     }
     setEditTarget(null);
   };
@@ -1179,6 +1210,7 @@ export function InventoryReview({
           />
         ) : (
           <>
+            <DraftSaveNotice show={autosave.unsaved} className="mt-3 px-1 text-xs text-muted-foreground" />
             {!embedded && actionableSuggestions.length > 0 && canWrite && (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3.5 py-3 text-2xs">
                 <label className="flex min-h-11 items-center gap-2">

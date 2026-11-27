@@ -113,15 +113,20 @@ SKIPS_KEY = "extraction_line_skips"
 APPLIED_LINES_KEY = "extraction_applied_lines"
 
 
+def _marker_waits(marker: dict[str, Any]) -> bool:
+    """True for a marker that only keeps a draft: the line was restored, or never skipped."""
+    return bool(marker.get("restored_at") or marker.get("pending"))
+
+
 def _skipped_line_ids(metadata: dict[str, Any]) -> set[str]:
-    """Lines that are skipped now. A restored line keeps its draft but waits again."""
+    """Lines that are skipped now. A line that only has a kept draft still waits."""
     skips = metadata.get(SKIPS_KEY)
     if not isinstance(skips, dict):
         return set()
     return {
         str(line_id)
         for line_id, marker in skips.items()
-        if isinstance(marker, dict) and not marker.get("restored_at")
+        if isinstance(marker, dict) and not _marker_waits(marker)
     }
 
 
@@ -231,7 +236,7 @@ def line_states(db: Session, document: Document) -> tuple[dict[str, dict[str, An
             if line_id in states or not isinstance(marker, dict):
                 continue
             states[line_id] = {
-                "status": "pending" if marker.get("restored_at") else "skipped",
+                "status": "pending" if _marker_waits(marker) else "skipped",
                 "at": marker.get("at"),
                 "description": marker.get("description"),
                 "quantity": marker.get("quantity"),
@@ -284,6 +289,62 @@ def change_line_skip(
             "at": datetime.now(UTC).isoformat(),
             "actor_user_id": str(actor_user_id) if actor_user_id else None,
         }
+    metadata[SKIPS_KEY] = skips
+    document.extracted_metadata = metadata
+    db.commit()
+    return get_document(db, household_id, document.id)
+
+
+def save_line_draft(
+    db: Session,
+    household_id: uuid.UUID,
+    document: Document,
+    line_id: str,
+    *,
+    actor_user_id: uuid.UUID | None,
+    edits: dict[str, Any] | None,
+) -> Document:
+    """Keep the corrections of a line that still waits. Nothing is applied or skipped.
+
+    The draft is stored in the marker that Skip uses, with a note that the line waits.
+    Without a draft the marker is removed. The last write wins.
+    """
+    document = db.scalar(
+        select(Document)
+        .where(Document.id == document.id, Document.household_id == household_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if document is None:
+        raise ApiError(404, "document_not_found", "Document not found.")
+    if line_id not in _known_line_ids(document):
+        raise ApiError(
+            422, "extraction_line_not_found", "An extracted line is no longer available."
+        )
+    if line_id in _applied_line_records(_document_applies(db, document)):
+        raise ApiError(
+            409,
+            "extraction_line_applied",
+            "This line was already applied. Its corrections were not kept.",
+        )
+    metadata = dict(document.extracted_metadata or {})
+    skips = dict(metadata.get(SKIPS_KEY) or {})
+    if line_id in _skipped_line_ids(metadata):
+        raise ApiError(
+            409,
+            "extraction_line_skipped",
+            "This line is skipped. Restore it to change it.",
+        )
+    values = {key: value for key, value in (edits or {}).items() if value is not None}
+    if values.get("draft"):
+        skips[line_id] = {
+            **values,
+            "at": datetime.now(UTC).isoformat(),
+            "actor_user_id": str(actor_user_id) if actor_user_id else None,
+            "pending": True,
+        }
+    else:
+        skips.pop(line_id, None)
     metadata[SKIPS_KEY] = skips
     document.extracted_metadata = metadata
     db.commit()

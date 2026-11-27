@@ -19,6 +19,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | 6 | Verification and final handoff | Done (see "Phase 6 record" and "Final checklist") |
 | — | Correction batch after the review of Phase 6 | Done (see "Correction batch record") |
 | — | Check in Mobile Safari on the iOS Simulator, and fixes | Done (see "iOS Simulator record") |
+| — | Pending corrections saved by themselves; more iOS sizes; Android; final production build | Done (see "Last round record") |
 
 All phases are finished and pushed to the branch. Nothing is merged or deployed.
 What is not complete is listed plainly under "Not complete" near the end.
@@ -984,6 +985,235 @@ complete run afterwards and six more times alone.
 - After "Done" on the keyboard, the search results stay open until the next
   tap elsewhere. Left as it is.
 
+## Last round record
+
+Done on 27 Nov 2026, after the iOS Simulator record. Three things were asked
+for: keep corrections on review rows across a reload without Skip or Apply;
+test other iOS sizes and Android; build the final code and run the
+production checks again behind nginx.
+
+### 1. Corrections on review rows are saved by themselves
+
+Before, a correction on a row that was neither skipped nor added lived in the
+page only. A reload lost it.
+
+Now the app sends a row's corrections to the server about 0.6 seconds after
+the last change. There is no Save button. The row stays "waiting": nothing is
+added, nothing counts as decided, no history line is written. A reload shows
+the corrected row. This holds for all four kinds:
+
+| Kind | Stored in | Endpoint |
+| --- | --- | --- |
+| Item rows of an import, a photo or a pasted list; place and container rows | the row's proposal, with the choices beside it | `PUT /imports/{batch}/entries/{entry}/draft` |
+| Lines of a document | the line's kept draft | `PUT /documents/{document}/extraction/lines/{line}/draft` |
+| Inventory suggestions ("Edit first" → "Keep for later") | the suggestion's kept edit | `PUT /inventory-review/suggestions/{suggestion}/draft` |
+
+No migration was needed. Rules:
+
+- One request per row with the whole current draft; never one per key press.
+- What still waits is sent when the page is hidden or left.
+- A viewer cannot save (403). Another household gets 404. A row that is no
+  longer waiting answers 409 and stores nothing. A draft that is too large or
+  not valid answers 422.
+- An empty draft puts the first reading back.
+- If saving fails, the corrections stay in the page, one quiet line says
+  "Your corrections are not saved yet. Trying again.", and the app tries
+  again. Add and Skip are never blocked by this; they send what is in the
+  page, as before.
+- Two tabs or two people: the last save wins.
+
+A read-only review of this change found one serious defect before the commit:
+a saved correction made the AI suggestions of that import unusable ("no longer
+current"), because the suggestions compare the import with what they first
+read. Fixed: the server keeps the first reading beside the draft and compares
+that. Accepting suggestions now keeps every field that was corrected by hand.
+Four backend tests and one web test cover it; they fail without the fix. The
+review found nothing wrong in permissions, household checks, races with Add
+and Skip, or the retry logic.
+
+**Limits of the saving, stated plainly:**
+
+- A correction made less than 0.6 seconds before the browser is killed, with
+  no "page is leaving" event, can be lost.
+- Leaving the page at once after a correction: in the production build, with
+  the service worker in control, a save could be lost: 2 of 100
+  tries in Chrome, and about 7 of 80 in earlier runs. The lost requests never
+  reached nginx. Without the service worker none was lost (0 of 100). Fixed
+  for browsers that can be told to send `/api/*` straight to the network
+  (Chrome 123 and later): 0 of 200 lost. Safari cannot be told so yet; there
+  a save sent at that moment may still be lost.
+- The fields at the top of a document review (merchant, dates, total) are not
+  rows. They still live in the page only.
+- An empty name or a quantity that is not a whole number is not stored; the
+  last valid value is.
+
+### 2. More iOS sizes
+
+All in the Simulator, real Mobile Safari, real keyboard. Upright phones:
+
+| Device | System | Size in points | Checks passed |
+| --- | --- | --- | --- |
+| iPhone SE (3rd generation) | 27.0 | 375 × 667 | 61 of 61 (48 in Safari, 13 as installed app) |
+| iPhone 13 mini | 27.0 | 375 × 812 | 48 of 48 |
+| iPhone 17e | 27.0 | 390 × 844 | 48 of 48 |
+| iPhone 17 | 26.1 | 402 × 874 | 48 of 48; the keyboard behaves as on 27.0 |
+| iPhone Air | 27.0 | 420 × 912 | 48 of 48 |
+| iPhone 18 Pro Max | 27.0 | 440 × 956 | 61 of 61 (48 + 13 installed app) |
+
+Other shapes, with what does not fit:
+
+| Device | Size | Result |
+| --- | --- | --- |
+| iPad mini, upright | 744 × 1133 | 43 of 45; the two that failed are the test tool (it did not reach a field far down) |
+| iPad Pro 11, on its side | 1210 × 834 | passes after the fixes below, with two limits: in the item side panel Save is not in view while the keyboard is open, and Close of Add items scrolls out of the box |
+| iPhone Air, on its side | 912 × 420 | the keyboard leaves 88 points; see the limits |
+| iPhone 17, on its side | 874 × 402 | the keyboard leaves 74 points; see the limits |
+
+Defects found on these sizes, and fixed:
+
+- **iPhone SE, Add items:** with the keyboard open the heading lay on the
+  text box and hid the typed text. The numbers passed; the picture showed it.
+- **375-point phones, assistant:** the top row did not fit and one button
+  dropped to a second row. The full-height button is now hidden under 380
+  points of width.
+- **iPad on its side, item side panel:** the field being typed in ended under
+  the Save bar. In the side panel the Save bar no longer sticks while a touch
+  keyboard is open.
+
+### 3. Android
+
+Chrome 145 on Android 17, in the Android emulator, with the real on-screen
+keyboard. Touches are real touch events and typing is real key input. The
+same journeys as on iOS: sign in, the bottom bar with the keyboard, the
+assistant, the robot and + buttons while typing, Add items, the bar editor on
+an import review, a correction kept across a reload, the item form, and
+list → item → the system Back.
+
+| Shape | Size in CSS pixels | Checks | Result |
+| --- | --- | --- | --- |
+| Phone | 411 × 834 | 46 | all pass |
+| Small phone | 360 × 560 | 46 | 45 pass; 1 limit |
+| Phone on its side | 914 × 331 | 45 | 41 pass; 4 limits |
+| Tablet, upright | 800 × 1160 | 46 | all pass |
+| Tablet on its side | 1280 × 680 | 44 | 42 pass; 2 limits |
+
+On the usual phone size everything passed at the first run: Android makes the
+visible part shorter and does not move it, which is the easy case. The other
+shapes found defects, all fixed:
+
+- **Small phone, assistant:** while typing, the top row with Close was pushed
+  off the screen and the message field hung below the visible part. The
+  suggested questions now hide while the keyboard is open, and a note hides
+  when the room is short.
+- **Tablet on its side (the desktop layout with a touch keyboard):** the
+  bottom bar sat under the keyboard while it was typed in. The assistant box,
+  the item side panel, centred dialogs and Add items were placed in the whole
+  window, not in the visible part. All of them now follow the keyboard.
+- **One trap found on the way:** a panel whose top followed the visible part
+  down the page carried the focused field away again each time Chrome moved
+  the view. Rule now: a box may follow the visible *bottom*; its top stays.
+- **Phone on its side:** the keyboard leaves a strip of about 80 pixels. The
+  Save bar of a form covered the field being typed in. In such a strip the
+  Save bar does not stick, the room rail and the assistant's top row hide,
+  and the field that is typed in has the strip.
+
+### Limits on small strips and wide screens (iOS and Android)
+
+- **A phone on its side with the keyboard open** shows one field and little
+  else. Search results are not shown while typing. In Add items the main
+  button is under the keyboard. In a form, Save is not in view. In the
+  assistant, Close is hidden; on an iPhone 17 the lowest 8 points of the
+  message field's frame lie under Safari's keyboard bar, the text is seen.
+  Closing the keyboard brings everything back. Nothing traps the person.
+- **A phone on its side with more than one Safari tab:** Safari's tab bar
+  leaves 18 to 36 points. The bar editor is under it. Turning the phone
+  upright solves it. This is Safari's layout.
+- **A tablet on its side:** in the item side panel Save is not in view while a
+  touch keyboard is open; it is at the end of the form. In Add items, Close
+  scrolls out of the box; a tap outside or scrolling up reaches it.
+- **iPad, "hide keyboard" key:** it leaves a small pill and the field keeps
+  the focus. The bar then stays above the bottom until the field loses focus.
+  To check on a real iPad.
+- **Add items on the iPhone SE:** Close lies on the top right corner of the
+  text box.
+- These are emulators and simulators. One Android version and one Android
+  browser (Chrome) were used. Samsung Internet and Firefox were not tried.
+
+### 4. The final build behind nginx
+
+The current code was built into images and run behind nginx, as its own
+Docker project with its own volumes (`housetory-pwa-check`, port 8090). The
+owner's `housetory-test` containers were not touched. The app and the API
+images were built at 14:49 CET; the web image again at 15:29 after the change
+to the service worker. No source file changed after these builds. The stack
+and its images and volumes were removed at the end.
+
+**End-to-end files against the production build** (Chromium):
+
+| File | Result |
+| --- | --- |
+| `release-stabilisation` | 2 of 2 |
+| `responsive-mobile` | 14 of 14 |
+| `add-items` | 2 of 2 (run again after the worker change: 2 of 2) |
+| `navigation` | 10 of 10 (again: 10 of 10) |
+| `offline-resource-audit` | 1 of 1 (again: 1 of 1) |
+| `ai-camera-import`, with the PWA test | 6 of 6 (PWA test again: 1 of 1) |
+| `touch-targets` | 8 of 8 |
+| `document-extraction` | 2 of 2 |
+| `inventory-review`, kept correction | 1 of 1 |
+
+**PWA checklist, all pass:** the manifest and icons load; the service worker
+registers, activates and controls the page; an old cache is dropped; nothing
+under `/api` is in the cache; an API read and a correction save both answer
+200 with the worker in control; with no network the app shows its own "can't
+reach the server" screen and "Try again" recovers; no content-security error
+on the item list or on an import review with the bar editor open.
+
+**A visitor who already had the old service worker:** the first page load
+after the new build is still served by the old worker. About 4 seconds later
+the new one takes over, with no reload and nothing to see.
+
+**Corrections through nginx:** a row corrected in the bar editor is there
+after a reload; see the numbers on leaving at once above.
+
+**Devices against the production build** (not the development server):
+
+| Device | Result |
+| --- | --- |
+| iPhone 17e, iOS 27.0, Safari | 48 of 48 |
+| iPhone SE, iOS 27.0, Safari | 48 of 48 |
+| iPhone 17, iOS 27.0, installed from "Add to Home Screen" | 13 of 13: the icon is named from the manifest, no browser bars, the bar stands on the keyboard |
+| iPad Pro 11 on its side, Safari | 37 of 41; the 4 are the two limits named above (Close of Add items, Save in the side panel) |
+| Android phone, Chrome | 47 of 48 in the full run; the one that failed (the password field in view on the sign-in page) was the first check after the screen size was reset, and passed 3 of 3 when run again |
+| Android small phone | 45 pass, 1 limit |
+| Android phone on its side | 41 pass, 4 limits |
+| Android tablet, upright | 46 of 46 |
+| Android tablet on its side | 42 pass, 2 limits |
+| Android, installed | Chrome offers "Install"; the icon opens the app with no browser bars and with the service worker in control; the bar stands on the keyboard (554 of 866 pixels left) and returns. On this emulator Chrome made a home-screen shortcut, not a full package; a real phone with HTTPS makes a package. |
+
+On the iPad the sign-in page showed one more small thing: on its side, the
+keyboard covers the password field after the email is typed. The Tab key or
+the arrow on the keyboard goes there and Safari brings it into view.
+
+### Checks on the final code
+
+| Check | Result |
+| --- | --- |
+| `tsc -b` | clean |
+| `vitest run` | 86 files, 622 tests pass |
+| `vite build` | passes |
+| Backend `pytest` on a fresh database | 928 tests: 925 pass, 1 skipped, 2 fail (the two old failures in `tests/test_actual_inventory.py`) |
+| `ruff check` | clean |
+| End-to-end, development servers, three groups | 45 of 45; 51 of 51; 102 of 102 that can run, 1 skipped |
+| `touch-targets` | 8 of 8; 5,101 controls measured, none under 44 × 44 |
+
+### Evidence
+
+Outside the repository, under the same `mfp-runtime` folder as before:
+`ios-sim/IOS_MATRIX.md` (every iOS device, every check line, every try) with
+pictures in `ios-sim/uitest/out-<device>/`; `android/` with the test script,
+one folder of pictures and one log per shape.
+
 ## Final checklist
 
 State is one of: **Done**, **Partly** (with what is missing), **Not done**.
@@ -1030,7 +1260,7 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | Reduced motion, labels and focus | Done | global rule kept; new controls have names |
 | Add-items Close problem reproduced before fixing | Done | "Phase 1 record" |
 | Small and large phone, short landscape, tablet, desktop exercised | Done | 320, 390, 844 x 390, 768 and 1440 px |
-| iPhone and PWA checks reported apart from browser checks | Done | none were done; said so here |
+| iPhone and PWA checks reported apart from browser checks | Done | simulator and emulator checks have their own records ("iOS Simulator record", "Last round record"); none on a real phone |
 
 ### Phase 2: capture, documents and reviews
 
@@ -1177,7 +1407,9 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | Production build behind nginx, as a PWA in desktop Chrome | Done | correction batch, point 6 |
 | Touch targets of 44 px | Done | `e2e/touch-targets.spec.ts`, correction batch, point 5 |
 | Mobile Safari and installed app on the iOS Simulator | Done | "iOS Simulator record": eight defects found and fixed |
-| A real iPhone in the hand | **Not done** | a separate device check for Ashkan |
+| Other iPhone sizes, iPad, iOS 26.1 (Simulator) | Done | "Last round record", point 2 |
+| Android phone and tablet shapes (emulator, Chrome) | Done | "Last round record", point 3 |
+| A real phone in the hand | **Not done** | a separate device check for Ashkan |
 
 ## Commits
 
@@ -1194,7 +1426,8 @@ All on `feat/mobile-first-programme`, on top of `main` at `f026cae`.
 | `ea69ef7` | Docs in line with the new interface; touch targets |
 | `a846424` | Phase 6: end-to-end files, fixes found by them, real-model fixes, the Phase 6 record |
 | `e55fd2a` | Correction batch: the seven points of the review, and its record |
-| the commit after `e55fd2a` | Fixes from the iOS Simulator check, and its record |
+| `d98436f` | Fixes from the iOS Simulator check, and its record |
+| the commit after `d98436f` | Corrections on review rows saved by themselves; fixes from more iOS sizes and Android; the last round record |
 
 The phases were built side by side, so they are not in number order.
 
@@ -1251,8 +1484,6 @@ note" was left out on purpose (point 3 of the decision).
 - **Positions on photos** were tried with one vision model only. Another model
   may give fewer or worse positions; bad boxes are dropped, wrong but
   well-formed ones cannot be detected.
-- **A correction on a review row that is neither skipped nor added** lives in
-  the page only. A reload brings the row back as it was read. Skip keeps it.
 - **Offline**, the app shows its "can't reach its server" screen, not the
   inventory. The wording of that screen speaks of the "API container".
 - **"Rotate credentials"** in the AI settings acts without asking first, and
@@ -1265,16 +1496,22 @@ note" was left out on purpose (point 3 of the decision).
 - **Each assistant change** costs three to five model requests.
 - **The phone rail in landscape** shows only about two rooms at a time. It
   scrolls, and it can be hidden.
+- **Small strips and wide screens with a touch keyboard:** see "Limits on
+  small strips and wide screens" in the last round record.
+- **Corrections saved by themselves:** see "Limits of the saving" in the last
+  round record (a kill within 0.6 seconds, leaving at once in Safari, the top
+  fields of a document review).
 
 ## Not complete
 
-Stated plainly, after the correction batch:
+Stated plainly, after the last round:
 
-1. **No check on a real iPhone in the hand.** The keyboard, the bottom bar and
-   the installed app were checked on the iOS Simulator (see "iOS Simulator
-   record"), which found and fixed eight defects. A simulator does not show
-   reach with a thumb, real speed, the camera or the edge swipe. This stays a
-   separate device check for Ashkan. Problems found there are to be fixed then.
+1. **No check on a real phone in the hand.** The keyboard, the bottom bar and
+   the installed app were checked on the iOS Simulator (six iPhone sizes, two
+   iPads, iOS 27.0 and 26.1) and on the Android emulator (five shapes). These
+   found and fixed real defects. They do not show reach with a thumb, real
+   speed, the camera or the edge swipe. This stays a separate device check for
+   Ashkan. Problems found there are to be fixed then.
 2. **Video links in assistant answers are not built.**
 3. **Hosted sign-up is design only**, as the specification allows.
 4. **Two backend tests fail**, as they did before this work

@@ -1162,8 +1162,14 @@ test("the shell: bar, rail, Add items, the assistant, menus and messages", async
         await audit.check("assistant, with a conversation");
         await open(assistant.getByText(/^Sources \(\d+\)/));
         await audit.check("assistant, sources open");
-        await assistant.getByRole("button", { name: "Make the assistant full height" }).click();
-        await audit.check("assistant, full height");
+        // Below 380 px the header has no room for the full-height button, so it is not shown there.
+        const tall = assistant.getByRole("button", { name: "Make the assistant full height" });
+        if (size.width >= 380) {
+          await tall.click();
+          await audit.check("assistant, full height");
+        } else {
+          await expect(tall).toBeHidden();
+        }
         await assistant.getByRole("button", { name: "Close assistant", exact: true }).click();
 
         // A message with an action: dismiss a capture review from the Review page.

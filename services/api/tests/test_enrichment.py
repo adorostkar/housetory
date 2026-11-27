@@ -491,6 +491,244 @@ def test_ai_only_retry_reuses_private_snapshot_without_parsing_or_duplicating(
     assert owner_client.get("/api/v1/items").json()["total"] == 0
 
 
+def _source_version(batch_id):
+    from housetory_api.models import ImportBatch
+    from housetory_api.services.enrichment import source_version
+
+    with SessionLocal() as db:
+        return source_version(db, db.get(ImportBatch, uuid.UUID(batch_id)))
+
+
+def _suggest_brand(monkeypatch, entry_id, brand="Canon"):
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {"refinements": [{"key": entry_id, "brand": brand}], "items": []},
+    )
+
+
+def test_kept_draft_of_a_waiting_row_leaves_ready_suggestions_usable_and_accept_keeps_it(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    attic = owner_client.post("/api/v1/rooms", json={"name": "Attic"}).json()
+    existing = owner_client.post(
+        "/api/v1/items", json={"name": "Old camera", "room_id": attic["id"], "quantity": 1}
+    ).json()["item"]
+    detail = process_import(
+        owner_client,
+        upload_text_import(owner_client, "Camera in the attic.")["id"],
+    )
+    entry = detail["entries"][0]
+    batch_url = f"/api/v1/imports/{detail['id']}"
+    draft_url = f"{batch_url}/entries/{entry['id']}/draft"
+    _suggest_brand(monkeypatch, entry["id"])
+    assert run_enhancement(job_payload(detail))["status"] == "ready"
+    version = _source_version(detail["id"])
+
+    # A draft that only changes the choices of the row is not a change of the source.
+    choices = {"action": "merge", "merge_item_id": existing["id"], "merge_fields": ["brand"]}
+    assert owner_client.put(draft_url, json=choices).status_code == 200
+    assert _source_version(detail["id"]) == version
+    # Neither is a correction of its values: the suggestions stay ready after a reload.
+    edited = {**entry["proposed"], "name": "Film camera", "quantity": 2}
+    saved = owner_client.put(
+        draft_url, json={**choices, "proposed": edited, "edited_fields": ["name"]}
+    )
+    assert saved.status_code == 200, saved.text
+    assert _source_version(detail["id"]) == version
+    current = owner_client.get(batch_url).json()
+    assert current["enhancement"]["status"] == "ready"
+    assert current["enhancement"]["proposals"]
+    assert current["entries"][0]["proposed"]["name"] == "Film camera"
+    assert "base" not in current["entries"][0]["proposed"]["relationships"]["review_draft"]
+
+    # Accepting keeps what the person changed (the named field and the one that only
+    # differs), takes the suggestion for the rest, and keeps the choices of the row.
+    accepted = owner_client.post(f"{batch_url}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    row = accepted.json()["entries"][0]
+    assert (row["id"], row["status"]) == (entry["id"], "proposed")
+    assert (row["proposed"]["name"], row["proposed"]["quantity"]) == ("Film camera", 2)
+    assert row["proposed"]["brand"] == "Canon"
+    assert row["proposed"]["relationships"]["review_draft"] == {
+        **choices,
+        "allow_duplicate": False,
+        "edited_fields": ["name", "quantity"],
+    }
+    # An empty draft now goes back to the accepted suggestion, not to the old reading.
+    cleared = owner_client.put(draft_url, json={}).json()["proposed"]
+    assert (cleared["name"], cleared["quantity"], cleared["brand"]) == ("Camera", 1, "Canon")
+    assert "review_draft" not in cleared["relationships"]
+
+    applied = owner_client.post(
+        f"{batch_url}/apply",
+        json={"entries": [{"id": entry["id"], "action": "import", "proposed": row["proposed"]}]},
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 1, applied.json()
+    created = next(
+        item
+        for item in owner_client.get("/api/v1/items").json()["items"]
+        if item["name"] == "Film camera"
+    )
+    assert (created["quantity"], created["brand"]) == (2, "Canon")
+
+
+def test_suggestions_made_after_a_draft_are_offered_and_a_skip_still_ends_them(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    detail = process_import(
+        owner_client,
+        upload_text_import(owner_client, "Camera in the attic.")["id"],
+    )
+    entry = detail["entries"][0]
+    batch_url = f"/api/v1/imports/{detail['id']}"
+    # The person corrects the row while the suggestions are still on their way. The
+    # brand is one of the corrections, so the suggested brand must not replace it.
+    edited = {**entry["proposed"], "name": "Film camera", "brand": "Nikon"}
+    saved = owner_client.put(
+        f"{batch_url}/entries/{entry['id']}/draft",
+        json={"proposed": edited, "edited_fields": ["name", "brand"]},
+    )
+    assert saved.status_code == 200, saved.text
+    _suggest_brand(monkeypatch, entry["id"])
+    assert run_enhancement(job_payload(detail))["status"] == "ready"
+    current = owner_client.get(batch_url).json()
+    assert current["enhancement"]["status"] == "ready"
+    # The suggestion was made for the row as it was read, not for the correction.
+    proposal = current["enhancement"]["proposals"][0]["proposed"]
+    assert (proposal["name"], proposal["brand"]) == ("Camera", "Canon")
+    assert "review_draft" not in proposal["relationships"]
+
+    accepted = owner_client.post(f"{batch_url}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    row = accepted.json()["entries"][0]["proposed"]
+    assert (row["name"], row["brand"]) == ("Film camera", "Nikon")
+
+    # A skip is a decision. It ends ready suggestions, as it always did.
+    other = process_import(
+        owner_client,
+        upload_text_import(owner_client, "Lamp in the attic.")["id"],
+    )
+    _suggest_brand(monkeypatch, other["entries"][0]["id"], "Osram")
+    assert run_enhancement(job_payload(other))["status"] == "ready"
+    skipped = owner_client.post(
+        f"/api/v1/imports/{other['id']}/apply",
+        json={"entries": [{"id": other["entries"][0]["id"], "action": "skip"}]},
+    )
+    assert skipped.status_code == 200, skipped.text
+    assert owner_client.post(f"/api/v1/imports/{other['id']}/enhancement/accept").status_code == 409
+
+
+def test_ai_only_retry_still_works_after_a_draft_was_kept(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        ai,
+        "config_for",
+        lambda *a, **k: replace(configured_ai, configured=False, enabled=False),
+    )
+    detail = process_import(
+        owner_client,
+        upload_text_import(owner_client, "Camera in the attic.")["id"],
+    )
+    assert detail["enhancement"]["status"] == "off"
+    entry = detail["entries"][0]
+    batch_url = f"/api/v1/imports/{detail['id']}"
+    saved = owner_client.put(
+        f"{batch_url}/entries/{entry['id']}/draft",
+        json={"proposed": {**entry["proposed"], "quantity": 3}, "edited_fields": ["quantity"]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    monkeypatch.setattr(ai, "config_for", lambda *a, **k: configured_ai)
+    _suggest_brand(monkeypatch, entry["id"])
+    retry = owner_client.post(f"{batch_url}/enhancement/retry")
+    assert retry.status_code == 200, retry.text
+    assert run_enhancement(job_payload(retry.json()))["status"] == "ready"
+    accepted = owner_client.post(f"{batch_url}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    row = accepted.json()["entries"][0]["proposed"]
+    assert (row["quantity"], row["brand"]) == (3, "Canon")
+
+
+def test_hierarchy_suggestions_keep_the_draft_of_a_place_row(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    detail = process(owner_client, upload_markdown(owner_client)["id"])
+    payload = job_payload(detail)
+    hierarchy = payload["inputs"]["hierarchy"]
+    batch_url = f"/api/v1/imports/{detail['id']}"
+    by_id = {entry["id"]: entry for entry in detail["entries"]}
+    ids = payload["inputs"]["entry_ids"]
+    # The first two nodes get a draft: one a new name, the other only other choices.
+    renamed, moved = by_id[ids[0]], by_id[ids[1]]
+    other_parent = next(
+        entry["id"]
+        for entry in detail["entries"]
+        if entry["entity_type"] == "room" and entry["id"] not in {renamed["id"], moved["id"]}
+    )
+    choices = {
+        "entity_type": "location",
+        "parent_entry_id": other_parent,
+        "legacy_identifier": "KEPT-1",
+        "allow_duplicate": True,
+    }
+    for entry, body in (
+        (renamed, {"proposed": {**renamed["proposed"], "name": "My own name"}}),
+        (moved, choices),
+    ):
+        saved = owner_client.put(f"{batch_url}/entries/{entry['id']}/draft", json=body)
+        assert saved.status_code == 200, saved.text
+
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "nodes": [
+                {
+                    "key": node["key"],
+                    "name": node["name"].upper(),
+                    "entity_type": node["entity_type"],
+                    "container_type": node["container_type"],
+                    "legacy_identifier": node["legacy_identifier"],
+                }
+                for node in hierarchy["nodes"][:2]
+            ],
+            "items": [
+                {
+                    "key": item["key"],
+                    "name": item["draft"]["name"],
+                    "quantity": item["draft"]["quantity"],
+                }
+                for item in hierarchy["items"]
+            ],
+        },
+    )
+    assert run_enhancement(payload)["status"] == "ready"
+    accepted = owner_client.post(f"{batch_url}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    after = {entry["id"]: entry for entry in accepted.json()["entries"]}
+    # The corrected name stays. The row that only had other choices takes the
+    # suggested name and keeps its kind, parent, old identifier and duplicate choice.
+    assert after[renamed["id"]]["proposed"]["name"] == "My own name"
+    assert after[moved["id"]]["proposed"]["name"] == moved["proposed"]["name"].upper()
+    draft = after[moved["id"]]["proposed"]["relationships"]["review_draft"]
+    assert {key: draft[key] for key in choices} == choices
+    # The rows themselves still wait where they were.
+    assert [
+        (entry["id"], entry["status"], entry["parent_entry_id"]) for entry in after.values()
+    ] == [(entry["id"], "proposed", entry["parent_entry_id"]) for entry in detail["entries"]]
+
+
 def test_failed_worker_is_retryable_and_source_is_still_usable(owner_client, configured_ai):
     detail = process_import(
         owner_client,

@@ -357,7 +357,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
       {showRail && (
         <RoomRail
           model={rail}
-          className="fixed left-0 top-0 z-30"
+          className="fixed left-0 top-0 z-30 [[data-keyboard-tiny]_&]:hidden"
           style={{ bottom: `calc(${showBar || barEditing ? "var(--shell-bar-height, 0px)" : "0px"} + var(--keyboard-inset, 0px))` }}
         />
       )}
@@ -373,7 +373,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             "z-[45]",
             compact
               ? "fixed inset-x-0 bottom-[var(--keyboard-inset,0px)] px-2 pt-2"
-              : "sticky bottom-0 px-12 pb-4 pt-3",
+              : "sticky bottom-[var(--keyboard-inset,0px)] px-12 pb-4 pt-3",
             compact && (softwareKeyboardOpen ? "pb-2" : "pb-[max(0.5rem,env(safe-area-inset-bottom))]"),
           )}
         >
@@ -431,7 +431,10 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
         <aside
           aria-label="Item"
           data-testid="item-panel"
-          className="fixed right-0 top-0 z-30 h-dvh overflow-y-auto overscroll-contain border-l border-border/70 bg-background px-6 pb-10 pt-6"
+          // With a touch keyboard open (a tablet held sideways) the panel ends where the
+          // keyboard begins. Its top stays where it is: a panel that followed the visible
+          // part down the page would carry the focused field away from it again.
+          className="fixed right-0 top-0 z-30 h-[calc(var(--visual-viewport-top,0px)+var(--visual-viewport-height,100dvh))] overflow-y-auto overscroll-contain scroll-pb-24 scroll-pt-4 border-l border-border/70 bg-background px-6 pb-10 pt-6"
           // The bar does not reach under the panel, so nothing in it needs to clear the bar.
           style={{ width: PANEL_WIDTH, "--shell-bar-height": "0px" } as React.CSSProperties}
         >
@@ -476,11 +479,11 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
               ? "top-[var(--visual-viewport-top,0px)] max-lg:rounded-t-none"
               : assistantTall ? "top-0 max-lg:rounded-t-none" : "top-[max(14dvh,env(safe-area-inset-top))]",
             // Desktop: a box above the bar, in the main column.
-            "lg:inset-x-auto lg:bottom-4 lg:left-[calc(264px+3rem)] lg:w-[min(44rem,calc(100vw-264px-6rem-var(--item-panel,0px)))] lg:rounded-2xl lg:border lg:data-[state=open]:animate-fade-in",
-            assistantTall ? "lg:top-4" : "lg:top-auto lg:h-[min(42rem,calc(100dvh-2rem))]",
+            "lg:inset-x-auto lg:bottom-[calc(var(--keyboard-inset,0px)+1rem)] lg:left-[calc(264px+3rem)] lg:w-[min(44rem,calc(100vw-264px-6rem-var(--item-panel,0px)))] lg:rounded-2xl lg:border lg:data-[state=open]:animate-fade-in",
+            assistantTall ? "lg:top-4" : "lg:top-auto lg:h-[min(42rem,calc(var(--visual-viewport-height,100dvh)-2rem))]",
           )}
         >
-          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3 [[data-keyboard-tiny]_&]:hidden">
             <DialogPrimitive.Title asChild><h2
               id="assistant-panel-title"
               ref={assistantHeading}
@@ -497,7 +500,8 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
                 aria-pressed={assistantTall}
                 aria-label={assistantTall ? "Make the assistant smaller" : "Make the assistant full height"}
                 title={assistantTall ? "Smaller" : "Full height"}
-                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2"
+                // On the narrowest phones the row has no room for it; the other buttons would wrap.
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2 max-[379px]:hidden"
               >
                 {assistantTall ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
               </button>
@@ -515,7 +519,8 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
               </button>
             </div>
           </div>
-          <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+          {/* A phone held sideways with the keyboard open: every point of height goes to the message field. */}
+          <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 [[data-keyboard-tiny]_&]:pb-1 [[data-keyboard-tiny]_&]:pt-0">
             {/* A review shown in the assistant edits its values in a bar at the foot of this surface. */}
             <BarEditorBoundary editorClassName="absolute inset-x-0 bottom-0 z-10 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 lg:rounded-b-2xl">
             <Suspense fallback={<PageFallback />}>

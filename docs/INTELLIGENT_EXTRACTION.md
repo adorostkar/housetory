@@ -128,6 +128,19 @@ Each reviewed line can choose:
 - **create** — create a new item with the reviewed name, quantity, optional
   brand/model/serial, room and optional container.
 
+A correction on a line that still waits is kept without Skip or Apply and
+without a button. The app sends the whole draft of the line (amounts, action
+and target, new item with its place, updates, stock choice and warranty) a
+short moment after its last change, and at once when the page is hidden, left
+or closed (`PUT /documents/{id}/extraction/lines/{line_id}/draft`). The line
+still waits and nothing is applied. A reload shows the line as it was
+corrected; a place that was kept wins over the place chosen at capture. An
+empty request forgets the draft. A line that was applied or skipped answers
+409 and keeps nothing. If a save fails, the review keeps what was typed, shows
+one quiet line and tries again. The fields of the document itself (merchant,
+dates, total, purchase choice) are not lines: they are not kept this way and
+are entered before applying.
+
 Stock rules:
 
 - Linking a receipt to an existing item does **not** increase its quantity.

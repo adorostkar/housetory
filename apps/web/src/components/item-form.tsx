@@ -1288,8 +1288,13 @@ function ItemFormFields(props: ItemFormProps) {
           data-testid="item-form-footer"
           className={cn(
             "sticky z-20 -mx-1 flex items-center justify-end gap-3 border-t border-border/70 bg-background/95 px-1 py-3 backdrop-blur-xl",
+            // A phone held sideways with the keyboard open: the footer would cover the field.
+            "[[data-keyboard-tiny]_&]:static",
+            // In the side panel (a tablet held sideways) the footer does not stick while a
+            // touch keyboard is open. The panel is short then, and the footer would lie
+            // on the field that is typed in. It sticks again when the keyboard closes.
             presentation === "panel"
-              ? "bottom-0"
+              ? "bottom-0 [[data-keyboard]_&]:static"
               : "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px))]",
           )}
         >

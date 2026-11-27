@@ -18,9 +18,10 @@ from ..domain import AiTask, DocumentType, ImportStatus
 from ..jobs import enqueue
 from ..models import Document, ImportBatch, ImportEntry, ImportSourceFile, Job
 from ..schemas.extraction import LineMatch
-from ..schemas.imports import ImportEnhancementEntry
+from ..schemas.imports import ImportEnhancementEntry, ProposedItem
 from . import ai
 from .ai_runtime import AiRuntimeConfig
+from .import_row_drafts import carry_draft_over, source_proposed
 
 TASK = "ai.enrich"
 DOCUMENT_AI_QUEUE = "ai-documents"
@@ -65,7 +66,9 @@ def source_version(db: Session, source: Document | ImportBatch) -> str:
             "entries": [
                 {
                     "id": entry.id,
-                    "proposed": entry.proposed,
+                    # A correction that is only kept for a waiting row is not part of
+                    # the source: the row counts as it was read.
+                    "proposed": source_proposed(entry.proposed),
                     "status": entry.status,
                     "parent": entry.parent_entry_id,
                     "type": entry.entity_type,
@@ -535,7 +538,6 @@ def _guard(db: Session, source, payload: dict) -> str | None:
 
 
 def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiRuntimeConfig):
-    from ..schemas.imports import ProposedItem
     from .import_hierarchy import HierarchyResult
     from .import_matching import build_index, to_proposed_item
     from .import_parse import ProposalDraft
@@ -555,7 +557,7 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
         metadata = _apply_ai_hierarchy(db, batch.household_id, hierarchy, config=config)
         for entry_id, value in zip(ids, [*hierarchy.nodes, *hierarchy.items], strict=True):
             entry = entries[entry_id]
-            proposed = ProposedItem.model_validate(entry.proposed)
+            proposed = ProposedItem.model_validate(source_proposed(entry.proposed))
             is_item = hasattr(value, "draft")
             proposed = proposed.model_copy(
                 update={
@@ -612,7 +614,9 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
             proposed = _apply_context_destination(db, batch, proposed)
             entry_id = ids[position] if position < len(ids) else None
             if entry_id is not None:
-                original = ProposedItem.model_validate(entries[entry_id].proposed)
+                original = ProposedItem.model_validate(
+                    source_proposed(entries[entry_id].proposed)
+                )
                 if original.field_sources.get("purchase_date") == "explicit" and original.purchase:
                     if proposed.purchase:
                         proposed.purchase.purchase_date = original.purchase.purchase_date
@@ -641,7 +645,7 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
             )
             base = {
                 key: value
-                for key, value in original.proposed.items()
+                for key, value in source_proposed(original.proposed).items()
                 if key not in {"confidence", "field_sources"}
             }
             if (
@@ -1040,14 +1044,27 @@ def accept_import_enhancement(db: Session, batch: ImportBatch) -> None:
             db.add(entry)
             position += 1
             total += 1
-        entry.proposed = proposal.proposed.model_dump(mode="json")
+        suggested = proposal.proposed.model_dump(mode="json")
+        # A waiting row with a kept correction keeps it: the fields the person changed
+        # keep the person's value, the rest take the suggestion, and the choices of the
+        # row stay. A skipped or decided row is replaced as before.
+        kept = (
+            carry_draft_over(entry.proposed, suggested)
+            if entry.status in {"proposed", "approved", "failed"}
+            else None
+        )
+        entry.proposed = kept or suggested
         entry.field_sources = proposal.proposed.field_sources
         entry.confidence = proposal.proposed.confidence
         entry.entity_type = proposal.entity_type
         entry.legacy_identifier = proposal.legacy_identifier
         entry.duplicate_candidates = [
             candidate.model_dump(mode="json")
-            for candidate in find_duplicates(db, batch.household_id, proposal.proposed)
+            for candidate in find_duplicates(
+                db,
+                batch.household_id,
+                ProposedItem.model_validate(kept) if kept else proposal.proposed,
+            )
         ]
     db.flush()
     batch.total_entries = total

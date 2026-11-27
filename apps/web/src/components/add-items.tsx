@@ -224,7 +224,10 @@ function AddItemsOverlay({
   if (desktop) {
     return (
       <Dialog open={open} onOpenChange={changeOpen}>
-        <DialogContent className="max-w-xl overflow-visible" hideClose={busy} {...guard}>
+        <DialogContent
+          // The place picker may reach outside the box. With a touch keyboard open the box
+          // is short, and it scrolls so that the main button can be reached.
+          className="max-w-xl overflow-visible [[data-keyboard]_&]:overflow-y-auto" hideClose={busy} {...guard}>
           <DialogHeader>
             <DialogTitle>Add items</DialogTitle>
             <DialogDescription>{description}</DialogDescription>
@@ -244,7 +247,9 @@ function AddItemsOverlay({
         }}
         {...guard}
       >
-        <SheetHeader className="pr-12">
+        {/* On a small phone the keyboard leaves the sheet little height. The heading
+            then moves away with the sheet, so it does not lie on the text box. */}
+        <SheetHeader className="pr-12 [[data-keyboard=short]_&]:static">
           <SheetTitle ref={titleRef} tabIndex={-1} className="focus:outline-none">
             Add items
           </SheetTitle>

@@ -119,6 +119,24 @@ Simulator record") the rules are these:
   is above a sticky Save bar.
 - On a touch screen, opening an existing item for editing does not focus a
   field, so the keyboard does not cover the form.
+- The root element carries `data-keyboard="open"` while a touch keyboard is
+  open, `"short"` when the visible height is under 420 px, and also
+  `data-keyboard-tiny` under 200 px (a phone held sideways). Styles use them
+  through `[[data-keyboard]_&]:…`. Short: the assistant's suggested questions
+  and notes hide, the Add-items heading does not stick. Tiny: the room rail
+  and the assistant's top row hide and a form's Save bar does not stick, so
+  the field that is typed in has the strip.
+- The wide layout follows a touch keyboard too (a tablet held sideways): the
+  bar and the bar editor stand on it, the assistant box and centred dialogs
+  stay in the visible part, the item side panel ends where the keyboard
+  begins, and its Save bar does not stick while the keyboard is open.
+- A box may follow the visible **bottom**. Its top must not follow
+  `--visual-viewport-top` when the focused field can lie outside what is
+  seen: the browser then moves the view again and the field runs away. The
+  phone assistant sheet is the one exception; its field is at its bottom.
+- The service worker tells the browser to send `/api/*` straight to the
+  network where the browser supports that, so a save sent while the page is
+  left does not pass through the worker.
 
 ## Dialogs and fixed controls
 

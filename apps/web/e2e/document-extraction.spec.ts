@@ -192,7 +192,6 @@ Visa 112.85
   await expect(drillLine.getByText("Identifier verified")).toBeVisible();
   await expect(drillLine.getByText(/serial number matches/)).toBeVisible();
 
-  await page.getByLabel(/^Merchant/).fill("Corner Hardware");
   const bitLine = page.getByRole("article", { name: `Drill Bit Set ${suffix}` });
   // A line without a match proposes a new item. Its room is chosen in the editor.
   await expect(bitLine.getByRole("button", { name: "Add item" })).toBeVisible();
@@ -200,6 +199,35 @@ Visa 112.85
   await expect(bitLine.getByText("No likely household match")).toBeVisible();
   await bitLine.getByLabel("Destination room").selectOption(room.id);
   await bitLine.getByLabel("Optional container").selectOption(box.id);
+
+  // The corrections of a line are kept by themselves: no Skip, no Apply. The line
+  // still waits, and a reload shows it as it was corrected.
+  const reviewUrl = `/api/v1/documents/${page.url().split("/").pop()}/extraction`;
+  await expect
+    .poll(async () => {
+      const review = (await (await request.get(reviewUrl)).json()) as {
+        lines: Array<{ id: string; description: string }>;
+        line_states?: Record<string, {
+          status: string;
+          draft?: { newItem?: { roomId?: string; locationId?: string } } | null;
+        }>;
+      };
+      const line = review.lines.find((entry) => entry.description === `Drill Bit Set ${suffix}`);
+      const state = line ? review.line_states?.[line.id] : undefined;
+      return [state?.status, state?.draft?.newItem?.roomId, state?.draft?.newItem?.locationId];
+    })
+    .toEqual(["pending", room.id, box.id]);
+  await page.reload();
+  await page.getByRole("button", { name: "Review extraction" }).click({ timeout: 30_000 });
+  await expect(bitLine.getByRole("checkbox")).not.toBeChecked();
+  await expect(bitLine.getByRole("button", { name: "Add item" })).toBeEnabled();
+  await bitLine.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(bitLine.getByLabel("Destination room")).toHaveValue(room.id);
+  await expect(bitLine.getByLabel("Optional container")).toHaveValue(box.id);
+  expect((await (await request.get(`/api/v1/items?room_id=${room.id}`)).json()).total).toBe(1);
+
+  // The fields of the document itself are not rows. They are entered before applying.
+  await page.getByLabel(/^Merchant/).fill("Corner Hardware");
   await page.getByRole("button", { name: "Select all" }).click();
   await page.getByRole("button", { name: /^Apply: add 1 item, link 1 item/ }).click();
 

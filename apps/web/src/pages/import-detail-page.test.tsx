@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { ImportReviewDraft } from "@/lib/assistant-documents";
 import type { ImportBatchDetail, ImportEntry } from "@/lib/types";
 import { BarEditorBoundary } from "@/components/shell/bar-editor";
@@ -24,7 +24,7 @@ vi.mock("@/lib/assistant-documents", () => ({
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn() } };
+  return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), put: vi.fn() } };
 });
 
 function entry(id: string, name: string, patch: Partial<ImportEntry> = {}): ImportEntry {
@@ -85,6 +85,28 @@ beforeEach(() => {
   vi.mocked(api.get).mockReset();
   vi.mocked(api.get).mockImplementation(async (path: string) =>
     (path === "/imports/batch-1" ? server : { items: [] }) as never);
+  // Like the server: the draft of a waiting row is kept in its proposal. The row stays
+  // as it is. A row that no longer waits answers 409.
+  vi.mocked(api.put).mockReset();
+  vi.mocked(api.put).mockImplementation(async (path: string, body?: unknown) => {
+    const id = path.split("/").at(-2)!;
+    const draft = body as {
+      action: string; merge_item_id: string | null; merge_fields: string[];
+      edited_fields: string[]; proposed: ImportEntry["proposed"];
+    };
+    const current = server.entries.find((item) => item.id === id);
+    if (!current || !["proposed", "failed"].includes(current.status)) {
+      throw new ApiError(409, "import_entry_not_pending", "This row is no longer waiting.");
+    }
+    server = { ...server, entries: server.entries.map((item) => item.id === id ? { ...item, proposed: {
+      ...draft.proposed,
+      relationships: { ...draft.proposed.relationships, review_draft: {
+        action: draft.action, merge_item_id: draft.merge_item_id, merge_fields: draft.merge_fields,
+        allow_duplicate: false, edited_fields: draft.edited_fields,
+      } },
+    } } : item) };
+    return server.entries.find((item) => item.id === id) as never;
+  });
   vi.mocked(api.post).mockReset();
   vi.mocked(api.post).mockImplementation(async (path: string, body?: unknown) => {
     if (path.endsWith("/restore")) {
@@ -450,6 +472,396 @@ describe("ImportDetailPage photo findings", () => {
 
     expect(api.post).not.toHaveBeenCalled();
     expect(within(screen.getByTestId("bar-editor")).getByRole("alert")).toHaveTextContent("Give this item a name.");
+  });
+});
+
+describe("ImportDetailPage kept corrections", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const draftPath = (id: string) => `/imports/batch-1/entries/${id}/draft`;
+  const pass = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+  const type = (name: string, value: string) =>
+    fireEvent.change(screen.getByRole("textbox", { name }), { target: { value } });
+  // The page is loaded with real time; the clock is held only for the corrections.
+  const load = async (options?: { bar?: boolean }) => {
+    const view = renderPage(options);
+    await screen.findByRole("article", { name: "Ladder" });
+    vi.useFakeTimers();
+    return view;
+  };
+
+  it("keeps a correction a short moment after the last change, in one request for the whole row", async () => {
+    await load();
+    await pass(2000);
+    // Nothing is sent for rows that were not touched.
+    expect(api.put).not.toHaveBeenCalled();
+
+    type("Name of Ladder", "Step");
+    await pass(300);
+    type("Name of Step", "Step ladder");
+    fireEvent.change(within(row("Step ladder")).getByRole("spinbutton"), { target: { value: "2" } });
+    await pass(599);
+    expect(api.put).not.toHaveBeenCalled();
+    await pass(1);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.put).mock.calls[0]).toEqual([draftPath("e1"), {
+      action: "import", merge_item_id: null, merge_fields: [], edited_fields: ["name", "quantity"],
+      proposed: expect.objectContaining({ name: "Step ladder", quantity: 2, serial_number: null }),
+    }, undefined]);
+    // The row is as it was: still there, not selected, with what was typed.
+    expect(screen.getByRole("textbox", { name: "Name of Step ladder" })).toHaveValue("Step ladder");
+    expect(screen.getByRole("checkbox", { name: "Select Step ladder" })).not.toBeChecked();
+    expect(screen.queryByText(/not saved yet/)).not.toBeInTheDocument();
+    const { toast } = await import("sonner");
+    expect(toast.success).not.toHaveBeenCalled();
+
+    // Selecting is not a correction. An empty name is not kept; the last real one stays.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Step ladder" }));
+    await pass(2000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    type("Name of Step ladder", "");
+    fireEvent.change(within(row("Unnamed")).getByRole("spinbutton"), { target: { value: "3" } });
+    await pass(600);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.put).mock.calls[1]![1]).toEqual(expect.objectContaining({
+      proposed: expect.objectContaining({ name: "Ladder", quantity: 3 }),
+    }));
+    expect(within(row("Unnamed")).getByRole("textbox", { name: "Name of Ladder" })).toHaveValue("");
+  });
+
+  it("keeps the action and its target, and a reload shows the row as it was corrected", async () => {
+    const view = await load();
+    type("Name of Drill", "Drill 18V");
+    fireEvent.click(within(row("Drill 18V")).getByRole("button", { name: "Update this one" }));
+    fireEvent.click(within(row("Drill 18V")).getByRole("checkbox", { name: "Brand" }));
+    type("Name of Rope", "Rope 30 m");
+    await pass(600);
+    // One request for each row that was corrected.
+    expect(vi.mocked(api.put).mock.calls.map((call) => call[0]).sort()).toEqual([draftPath("e2"), draftPath("e3")]);
+    expect(vi.mocked(api.put).mock.calls.find((call) => call[0] === draftPath("e3"))![1]).toEqual(
+      expect.objectContaining({
+        action: "merge", merge_item_id: "item-9", merge_fields: ["serial_number", "brand"],
+        proposed: expect.objectContaining({ name: "Drill 18V", serial_number: "NEW-7" }),
+      }),
+    );
+
+    // A reload has only what the server kept. No Skip and no Add was pressed.
+    view.unmount();
+    vi.useRealTimers();
+    drafts.clear();
+    vi.mocked(api.put).mockClear();
+    expect(server.entries.map((item) => item.status)).toEqual(["proposed", "proposed", "proposed"]);
+    renderPage();
+    const drill = await screen.findByRole("article", { name: "Drill 18V" });
+    expect(within(drill).getByRole("button", { name: "Updating this one" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(drill).getByRole("checkbox", { name: "Brand" })).toBeChecked();
+    expect(within(drill).getByRole("checkbox", { name: "Serial number" })).toBeChecked();
+    expect(within(drill).getByRole("button", { name: "Apply changes" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Name of Rope 30 m" })).toHaveValue("Rope 30 m");
+    for (const box of screen.getAllByRole("checkbox", { name: /^Select / })) expect(box).not.toBeChecked();
+    // What was loaded is what the server has: nothing is sent again.
+    vi.useFakeTimers();
+    await pass(2000);
+    expect(api.put).not.toHaveBeenCalled();
+
+    // Applying the row does what was chosen before the reload.
+    fireEvent.click(within(drill).getByRole("button", { name: "Apply changes" }));
+    await pass(0);
+    expect(vi.mocked(api.post).mock.calls.at(-1)![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e3", action: "merge", merge_item_id: "item-9", merge_fields: ["serial_number", "brand"],
+      proposed: expect.objectContaining({ name: "Drill 18V" }),
+    })] });
+  });
+
+  it("sends what still waits when the page is hidden or left, and when the review goes away", async () => {
+    const view = await load();
+    type("Name of Ladder", "Step ladder");
+    window.dispatchEvent(new Event("pagehide"));
+    // It does not wait for the short moment, and the request may outlive the page.
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.put).mock.calls[0]).toEqual([
+      draftPath("e1"), expect.objectContaining({ proposed: expect.objectContaining({ name: "Step ladder" }) }),
+      { keepalive: true },
+    ]);
+    await pass(2000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    type("Name of Rope", "Rope 30 m");
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    expect(api.put).toHaveBeenCalledTimes(2);
+
+    type("Name of Rope 30 m", "Rope 40 m");
+    view.unmount();
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(api.put).mock.calls[2]![1]).toEqual(
+      expect.objectContaining({ proposed: expect.objectContaining({ name: "Rope 40 m" }) }),
+    );
+    await pass(2000);
+    expect(api.put).toHaveBeenCalledTimes(3);
+  });
+
+  it("says quietly when a correction could not be kept, tries again, and never blocks Add", async () => {
+    const { toast } = await import("sonner");
+    await load();
+    vi.mocked(api.put)
+      .mockRejectedValueOnce(new ApiError(0, "network_error", "Housetory can't reach the server."))
+      .mockRejectedValueOnce(new ApiError(503, "request_failed", "Something went wrong."));
+    type("Name of Ladder", "Step ladder");
+    await pass(600);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Your corrections are not saved yet. Trying again.")).toHaveAttribute("role", "status");
+    // The draft on the page is as it was typed, and the row can still be added or skipped.
+    expect(screen.getByRole("textbox", { name: "Name of Step ladder" })).toHaveValue("Step ladder");
+    expect(within(row("Step ladder")).getByRole("button", { name: "Add item" })).toBeEnabled();
+    expect(within(row("Step ladder")).getByRole("button", { name: "Skip" })).toBeEnabled();
+    expect(toast.error).not.toHaveBeenCalled();
+
+    // It is tried again by itself, and again when the connection returns.
+    await pass(5000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Your corrections are not saved yet. Trying again.")).toBeVisible();
+    window.dispatchEvent(new Event("online"));
+    await pass(0);
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(api.put).mock.calls[2]![1]).toEqual(
+      expect.objectContaining({ proposed: expect.objectContaining({ name: "Step ladder" }) }),
+    );
+    expect(screen.queryByText("Your corrections are not saved yet. Trying again.")).not.toBeInTheDocument();
+
+    // A change of another row is also a moment to try a row that failed.
+    vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+    type("Name of Step ladder", "Tall ladder");
+    await pass(600);
+    expect(screen.getByText("Your corrections are not saved yet. Trying again.")).toBeVisible();
+    vi.mocked(api.put).mockClear();
+    type("Name of Rope", "Rope 30 m");
+    await pass(600);
+    expect(vi.mocked(api.put).mock.calls.map((call) => call[0]).sort()).toEqual([draftPath("e1"), draftPath("e2")]);
+    expect(screen.queryByText("Your corrections are not saved yet. Trying again.")).not.toBeInTheDocument();
+    expect(server.entries[0]!.proposed.name).toBe("Tall ladder");
+  });
+
+  it("keeps a corrected field when the suggestions are loaded, and takes the suggestion for the rest", async () => {
+    const suggestion = { ...server.entries[0]!.proposed, name: "Ladder, aluminium", brand: "Wibe" };
+    server = { ...server, enhancement: {
+      status: "ready", job_id: "job-1", version: "v1", reason: null, error: null, provider: "ollama",
+      model: "test", ai_attempted: true, ai_succeeded: true,
+      proposals: [{ entry_id: "e1", proposed: suggestion, entity_type: "item", legacy_identifier: null, source_excerpt: null }],
+    } };
+    const view = renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    // Like the server: the suggestion goes under the draft it has kept for the row.
+    vi.mocked(api.post).mockImplementationOnce(async (path) => {
+      expect(path).toBe("/imports/batch-1/enhancement/accept");
+      server = { ...server, enhancement: { ...server.enhancement!, status: "accepted" },
+        entries: server.entries.map((item) => {
+          if (item.id !== "e1") return item;
+          const draft = item.proposed.relationships.review_draft as { edited_fields?: string[] } | undefined;
+          const kept = Object.fromEntries((draft?.edited_fields ?? []).map((field) =>
+            [field, item.proposed[field as keyof typeof item.proposed]]));
+          return { ...item, proposed: { ...suggestion, ...kept,
+            relationships: draft ? { review_draft: draft } : {} } };
+        }) };
+      return server as never;
+    });
+    const name = screen.getByRole("textbox", { name: "Name of Ladder" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Step ladder");
+    // The suggestions are loaded at once, before the short moment has passed.
+    await userEvent.click(screen.getByText("Review AI suggestions"));
+    await userEvent.click(screen.getByRole("button", { name: "Load suggestions into review" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    // The correction that still waited was sent first, so the server could keep it.
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.put).mock.calls[0]![1]).toEqual(expect.objectContaining({
+      edited_fields: ["name"], proposed: expect.objectContaining({ name: "Step ladder", brand: null }),
+    }));
+    expect(vi.mocked(api.put).mock.invocationCallOrder[0]!)
+      .toBeLessThan(vi.mocked(api.post).mock.invocationCallOrder[0]!);
+    await waitFor(() => expect(server.entries[0]!.proposed).toEqual(
+      expect.objectContaining({ name: "Step ladder", brand: "Wibe" }),
+    ));
+    expect(await screen.findByRole("textbox", { name: "Name of Step ladder" })).toHaveValue("Step ladder");
+
+    // A reload shows the same row, and adding it sends the person's name with the
+    // suggested brand. Nothing more was sent for the row in between.
+    view.unmount();
+    drafts.clear();
+    renderPage();
+    const reloaded = await screen.findByRole("article", { name: "Step ladder" });
+    await userEvent.click(within(reloaded).getByRole("button", { name: "Add item" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.post).mock.calls[1]![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e1", action: "import", proposed: expect.objectContaining({ name: "Step ladder", brand: "Wibe" }),
+    })] });
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits a moment, without a message, when other rows of the import are being added just then", async () => {
+    await load();
+    vi.mocked(api.put).mockRejectedValueOnce(
+      new ApiError(409, "import_busy", "Rows of this import are being added right now. Try again."),
+    );
+    type("Name of Rope", "Rope 30 m");
+    await pass(600);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Your corrections are not saved yet. Trying again.")).not.toBeInTheDocument();
+    await pass(1000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(server.entries[1]!.proposed.name).toBe("Rope 30 m");
+  });
+
+  it("adds a row right after a correction with the corrected values, and the waiting draft does no harm", async () => {
+    const { toast } = await import("sonner");
+    await load();
+    type("Name of Ladder", "Step ladder");
+    fireEvent.change(within(row("Step ladder")).getByRole("spinbutton"), { target: { value: "2" } });
+    fireEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
+    await pass(0);
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.post).mock.calls[0]![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e1", action: "import", proposed: expect.objectContaining({ name: "Step ladder", quantity: 2 }),
+    })] });
+    // The draft that waited is dropped: the row is decided.
+    await pass(5000);
+    expect(api.put).not.toHaveBeenCalled();
+    expect(within(row("Step ladder")).getByText("Added")).toBeVisible();
+
+    // A draft that was already on its way when the row was skipped gets 409. It is
+    // ignored: no line, no message, and the skip keeps the newest values.
+    type("Name of Rope", "Rope 30 m");
+    await pass(600);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    let refuse!: (error: unknown) => void;
+    vi.mocked(api.put).mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+    type("Name of Rope 30 m", "Rope 40 m");
+    await pass(600);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(row("Rope 40 m")).getByRole("button", { name: "Skip" }));
+    await pass(0);
+    refuse(new ApiError(409, "import_entry_not_pending", "This row is no longer waiting."));
+    await pass(5000);
+    expect(vi.mocked(api.post).mock.calls.at(-1)![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e2", action: "skip", edited_fields: ["name"],
+      proposed: expect.objectContaining({ name: "Rope 40 m" }),
+    })] });
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Your corrections are not saved yet. Trying again.")).not.toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a row that another tab corrected, and a reload shows the newest kept draft", async () => {
+    const view = await load();
+    // Another tab keeps a correction of Rope while this page is open.
+    server = { ...server, entries: server.entries.map((item) => item.id === "e2"
+      ? { ...item, proposed: { ...item.proposed, name: "Rope from the other tab" } } : item) };
+    fireEvent.click(within(row("Ladder")).getByRole("button", { name: "Add item" }));
+    await pass(0);
+    await pass(5000);
+    // This page did not change Rope, so it sends nothing for it and keeps what it shows.
+    expect(vi.mocked(api.put).mock.calls).toEqual([]);
+    expect(row("Rope")).toBeVisible();
+    // The last write wins: a correction made here goes over the other one.
+    type("Name of Drill", "Drill 18V");
+    await pass(600);
+    expect(vi.mocked(api.put).mock.calls.map((call) => call[0])).toEqual([draftPath("e3")]);
+
+    view.unmount();
+    vi.useRealTimers();
+    drafts.clear();
+    renderPage();
+    expect(await screen.findByRole("article", { name: "Rope from the other tab" })).toBeVisible();
+    expect(row("Drill 18V")).toBeVisible();
+  });
+
+  it("keeps the corrections of a place or container row: name, kinds, parent and old identifier", async () => {
+    const node = (id: string, name: string, type: string, parent: string | null, patch: Partial<ImportEntry> = {}) =>
+      entry(id, name, { entity_type: type as ImportEntry["entity_type"], parent_entry_id: parent, ...patch });
+    server = batchOf([
+      node("r1", "Storage", "room", null),
+      node("r2", "Attic", "room", null),
+      node("c1", "Box A", "container", "r1", { legacy_identifier: "STO-01" }),
+      node("i1", "Cables", "item", "c1"),
+    ], { metadata: { hierarchy: true } });
+    const view = renderPage();
+    const box = await screen.findByRole("article", { name: "Box A" });
+    vi.useFakeTimers();
+    fireEvent.click(within(box).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(box).getByRole("textbox", { name: "Name" }), { target: { value: "Blue box" } });
+    const blue = row("Blue box");
+    fireEvent.change(within(blue).getByRole("combobox", { name: "Container type" }), { target: { value: "crate" } });
+    fireEvent.change(within(blue).getByRole("textbox", { name: "Legacy identifier" }), { target: { value: "BOX-9" } });
+    // A new parent moves the row to another branch.
+    fireEvent.change(within(blue).getByRole("combobox", { name: "Parent" }), { target: { value: "r2" } });
+    await pass(600);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.put).mock.calls[0]).toEqual([draftPath("c1"), {
+      action: "import", merge_item_id: null, merge_fields: [], allow_duplicate: false,
+      entity_type: "container", parent_entry_id: "r2", legacy_identifier: "BOX-9",
+      edited_fields: ["name", "relationships"],
+      proposed: expect.objectContaining({ name: "Blue box", relationships: { container_type: "crate" } }),
+    }, undefined]);
+    fireEvent.click(within(row("Blue box")).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row("Blue box")).getByRole("combobox", { name: "Entity type" }), { target: { value: "location" } });
+    await pass(600);
+    expect(vi.mocked(api.put).mock.calls[1]![1]).toEqual(expect.objectContaining({ entity_type: "location" }));
+
+    // The mock server keeps the choices as the real one does, inside the proposal.
+    server = { ...server, entries: server.entries.map((item) => item.id === "c1" ? { ...item, proposed: {
+      ...item.proposed, relationships: { ...item.proposed.relationships, review_draft: {
+        ...(item.proposed.relationships.review_draft as object),
+        entity_type: "location", parent_entry_id: "r2", legacy_identifier: "BOX-9",
+      } },
+    } } : item) };
+    view.unmount();
+    vi.useRealTimers();
+    drafts.clear();
+    renderPage();
+    await screen.findByRole("article", { name: "Blue box" });
+    await userEvent.click(within(row("Blue box")).getByRole("button", { name: "Edit" }));
+    const reloaded = row("Blue box");
+    expect(within(reloaded).getByRole("combobox", { name: "Entity type" })).toHaveValue("location");
+    expect(within(reloaded).getByRole("combobox", { name: "Parent" })).toHaveValue("r2");
+    expect(within(reloaded).getByRole("textbox", { name: "Legacy identifier" })).toHaveValue("BOX-9");
+    // The row itself was not changed on the server: it still waits as a container.
+    expect(server.entries[2]).toEqual(expect.objectContaining({
+      status: "proposed", entity_type: "container", parent_entry_id: "r1", legacy_identifier: "STO-01",
+    }));
+  });
+
+  it("keeps a value that was changed through the bar, and the pin of a finding keeps its corrected name", async () => {
+    server = batchOf(
+      [entry("e1", "Ladder"), entry("e2", "Rope")].map((item, index) => ({
+        ...item, source_region: { x: 0.1 + index * 0.4, y: 0.2, width: 0.2, height: 0.3 },
+      })),
+      { source_type: "image", metadata: { recognition_id: "rec-1" } },
+    );
+    const view = renderPage({ bar: true });
+    await screen.findByRole("article", { name: "Ladder" });
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: "Edit quantity of Ladder" }));
+    const quantity = await barField();
+    await userEvent.clear(quantity);
+    await userEvent.type(quantity, "2{Enter}");
+    await userEvent.click(within(row("Ladder")).getByRole("button", { name: "Edit name of Ladder" }));
+    const name = await barField();
+    await userEvent.clear(name);
+    await userEvent.type(name, "Step ladder{Enter}");
+    await waitFor(() => expect(api.put).toHaveBeenCalled(), { timeout: 3000 });
+    await waitFor(() => expect(server.entries[0]!.proposed).toEqual(
+      expect.objectContaining({ name: "Step ladder", quantity: 2 }),
+    ), { timeout: 3000 });
+    // The editor of the bar is closed by the person, not by the save.
+    expect(screen.queryByTestId("bar-editor")).not.toBeInTheDocument();
+
+    view.unmount();
+    drafts.clear();
+    renderPage({ bar: true });
+    const reloaded = await screen.findByRole("article", { name: "Step ladder" });
+    expect(within(reloaded).getByRole("button", { name: "Edit quantity of Step ladder" })).toHaveTextContent("×2");
+    expect(within(reloaded).getByRole("button", { name: "Edit name of Step ladder" })).toHaveTextContent("Step ladder");
+    expect(screen.getByRole("button", { name: "Finding 1: Step ladder" })).toBeVisible();
   });
 });
 

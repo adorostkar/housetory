@@ -16,6 +16,11 @@ import { isTextEntry } from "@/hooks/use-software-keyboard-open";
  * open, but fixed boxes are still placed in the full area. The root element keeps
  * the full height.
  */
+/** Under this visible height, with the keyboard open, a sheet has room for typing only. */
+const SHORT_HEIGHT = 420;
+/** Under this height there is room for one field and nothing else. */
+const TINY_HEIGHT = 200;
+
 export function layoutViewportHeight(): number {
   return Math.max(window.innerHeight, document.documentElement.clientHeight);
 }
@@ -47,6 +52,14 @@ export function useKeyboardInset(): void {
       // The height of what is seen. A sheet that stands on the keyboard is not taller.
       if (keyboard) root.style.setProperty("--visual-viewport-height", `${height}px`);
       else root.style.removeProperty("--visual-viewport-height");
+      // For styles: "short" when the keyboard leaves little height (a small phone,
+      // or a phone held sideways). Things that are not needed for typing hide then.
+      if (keyboard) root.dataset.keyboard = height < SHORT_HEIGHT ? "short" : "open";
+      else delete root.dataset.keyboard;
+      // "Tiny": a phone held sideways, where the keyboard leaves a strip of some
+      // 70 px. Only the field that is typed in can be shown there.
+      if (keyboard && height < TINY_HEIGHT) root.dataset.keyboardTiny = "";
+      else delete root.dataset.keyboardTiny;
     };
     const schedule = () => {
       if (!frame) {
@@ -86,6 +99,8 @@ export function useKeyboardInset(): void {
       root.style.removeProperty("--keyboard-inset");
       root.style.removeProperty("--visual-viewport-top");
       root.style.removeProperty("--visual-viewport-height");
+      delete root.dataset.keyboard;
+      delete root.dataset.keyboardTiny;
     };
   }, []);
 }

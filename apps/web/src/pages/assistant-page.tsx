@@ -1027,11 +1027,13 @@ export function AssistantPage({
         )}
       </div>
 
-      <div className="shrink-0 pt-2">
+      <div className="shrink-0 pt-2 [[data-keyboard-tiny]_&]:pt-0">
         <div className="mx-auto w-full max-w-5xl">
           {messages.length === 0 && !pending && (
             <div
-              className="-mx-1 mb-2 flex max-h-[10dvh] flex-wrap gap-2 overflow-y-auto px-1 pb-1 sm:max-h-24"
+              // While the phone keyboard is open the person is typing a question of
+              // their own, and the room is needed for the message field.
+              className="-mx-1 mb-2 flex max-h-[10dvh] flex-wrap gap-2 overflow-y-auto px-1 pb-1 sm:max-h-24 [[data-keyboard]_&]:hidden"
               aria-label="Suggested questions"
             >
               {SUGGESTIONS.map((suggestion) => (
@@ -1047,9 +1049,9 @@ export function AssistantPage({
               ))}
             </div>
           )}
-          <section className="surface bg-card/95 p-2.5 shadow-lg sm:p-3">
+          <section className="surface bg-card/95 p-2.5 shadow-lg sm:p-3 [[data-keyboard-tiny]_&]:p-1 [[data-keyboard-tiny]_&]:sm:p-1">
             {localSearchMode && (
-              <p role="note" aria-label="Local search mode" className="mb-2 break-words text-xs text-muted-foreground">
+              <p role="note" aria-label="Local search mode" className="mb-2 break-words text-xs text-muted-foreground [[data-keyboard=short]_&]:hidden">
                 <span className="font-medium text-foreground">Local search mode.</span>{" "}
                 Typed actions need the AI assistant; use the item&apos;s buttons, or{" "}
                 <Link className="underline" to="/settings/ai">set up AI in Settings</Link>.

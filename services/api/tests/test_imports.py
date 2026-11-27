@@ -1780,3 +1780,284 @@ def test_skip_reload_restore_keeps_the_complete_edited_draft_and_apply_uses_it(o
     updated = owner_client.get(f"/api/v1/items/{existing_id}").json()["item"]
     assert updated["name"] == "Old rope"
     assert (updated["brand"], updated["quantity"]) == ("Beal", 3)
+
+
+def _member_headers(client, role, email):
+    """A session cookie for another member of the owner's household."""
+    import uuid
+
+    from housetory_api.config import get_settings
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import HouseholdMember, User
+    from housetory_api.security import hash_password
+    from housetory_api.services.auth import create_session
+
+    household_id = uuid.UUID(client.get("/api/v1/auth/session").json()["household"]["id"])
+    with SessionLocal() as db:
+        user = User(
+            name=f"Import {role}",
+            email=email,
+            password_hash=hash_password("import-member-password-2026"),
+        )
+        db.add(user)
+        db.flush()
+        db.add(HouseholdMember(household_id=household_id, user_id=user.id, role=role))
+        token = create_session(
+            db,
+            user=user,
+            settings=get_settings(),
+            user_agent="import-test",
+            ip_address="127.0.0.1",
+            household_id=household_id,
+        )
+        db.commit()
+    return {"Cookie": f"housetory_session={token}"}
+
+
+def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(owner_client):
+    attic = create_room(owner_client, "Attic")
+    garage = create_room(owner_client, "Garage")
+    shelf = create_location(owner_client, garage["id"], "Shelf B")
+    tools = owner_client.post("/api/v1/categories", json={"name": "Tools"}).json()
+    existing = owner_client.post(
+        "/api/v1/items", json={"name": "Old rope", "room_id": attic["id"], "quantity": 1}
+    ).json()
+    existing_id = existing.get("item", existing)["id"]
+    batch = upload_text_import(
+        owner_client, "Ladder in the attic. Rope in the attic. Lamp in the attic."
+    )
+    detail = process_import(owner_client, batch["id"])
+    entries = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
+    ladder, rope, lamp = entries["Ladder"], entries["Rope"], entries["Lamp"]
+    batch_url = f"/api/v1/imports/{batch['id']}"
+
+    def draft_url(entry):
+        return f"{batch_url}/entries/{entry['id']}/draft"
+
+    def matched(kind, record, room_id=None):
+        return {
+            "text": record["name"],
+            "entity_type": kind,
+            "status": "matched",
+            "matched_id": record["id"],
+            "name": record["name"],
+            "room_id": room_id or record["id"],
+            "parent_id": None,
+            "suggested_parent_id": None,
+            "candidates": [],
+        }
+
+    # Every group of the row editor is changed: identity, category and tags, location,
+    # prices, warranty and notes.
+    edited_ladder = {
+        **ladder["proposed"],
+        "name": "Step ladder",
+        "quantity": 2,
+        "description": "Aluminium, 6 steps",
+        "brand": "Wibe",
+        "model": "55P",
+        "serial_number": "SN-LADDER-1",
+        "category": {
+            "text": "Tools",
+            "status": "matched",
+            "matched_id": tools["id"],
+            "name": "Tools",
+            "candidates": [],
+        },
+        "tags": ["garage", "tall"],
+        "room": matched("room", garage),
+        "storage_location": matched("storage_location", shelf, garage["id"]),
+        "purchase": {
+            "merchant": "Bauhaus",
+            "purchase_date": "2026-03-04",
+            "price_cents": 129900,
+            "currency": "SEK",
+            "order_number": "ORD-77",
+            "notes": None,
+        },
+        "warranty": {
+            "provider": "Wibe",
+            "start_date": None,
+            "duration_months": None,
+            "end_date": "2031-03-04",
+            "notes": None,
+        },
+        "notes": "Check the feet",
+    }
+    ladder_fields = ["name", "quantity", "description", "brand", "room", "purchase"]
+    edited_rope = {**rope["proposed"], "name": "Climbing rope", "brand": "Beal", "quantity": 3}
+    rope_choice = {
+        "action": "merge",
+        "merge_item_id": existing_id,
+        "merge_fields": ["brand", "quantity"],
+    }
+
+    def fetch():
+        fetched = owner_client.get(batch_url).json()
+        return fetched, {entry["id"]: entry for entry in fetched["entries"]}
+
+    def kept(actual, expected):
+        # The stored proposal may add default keys; every value that was sent is there.
+        if isinstance(expected, dict):
+            return all(kept(actual.get(key), value) for key, value in expected.items())
+        return actual == expected
+
+    before, _ = fetch()
+    first = owner_client.put(
+        draft_url(ladder),
+        json={"proposed": {**edited_ladder, "name": "Ladder, first try"}},
+    )
+    assert first.status_code == 200, first.text
+    # The last write wins, and sending the same draft twice changes nothing.
+    for _attempt in range(2):
+        saved = owner_client.put(
+            draft_url(ladder),
+            json={
+                "action": "import",
+                "allow_duplicate": True,
+                "proposed": edited_ladder,
+                "edited_fields": ladder_fields,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["status"] == "proposed"
+    saved = owner_client.put(draft_url(rope), json={**rope_choice, "proposed": edited_rope})
+    assert saved.status_code == 200, saved.text
+
+    # A reload: both rows still wait, with the whole draft. Nothing was decided: the
+    # batch, its counts and the inventory are as they were.
+    after, rows = fetch()
+    for key in ("status", "total_entries", "imported_entries", "skipped_entries", "failed_entries"):
+        assert after[key] == before[key], key
+    assert {entry["status"] for entry in after["entries"]} == {"proposed"}
+    assert owner_client.get("/api/v1/items").json()["total"] == 1
+    for key, value in edited_ladder.items():
+        if key != "relationships":
+            assert kept(rows[ladder["id"]]["proposed"][key], value), key
+    assert rows[ladder["id"]]["proposed"]["relationships"]["review_draft"] == {
+        "action": "import",
+        "merge_item_id": None,
+        "merge_fields": [],
+        "allow_duplicate": True,
+        "edited_fields": ladder_fields,
+    }
+    rope_draft = rows[rope["id"]]["proposed"]["relationships"]["review_draft"]
+    assert rope_draft == {**rope_choice, "allow_duplicate": False}
+    for key in ("name", "brand", "quantity"):
+        assert rows[rope["id"]]["proposed"][key] == edited_rope[key], key
+
+    # Who may not write, and what is not accepted. None of it changes what is stored.
+    viewer = _member_headers(owner_client, "viewer", "import-draft-viewer@example.com")
+    body = {"proposed": {**edited_ladder, "name": "Changed by someone else"}}
+    assert owner_client.put(draft_url(ladder), headers=viewer, json=body).status_code == 403
+    for bad in (
+        {"proposed": {**edited_ladder, "quantity": -1}},
+        {"proposed": {**edited_ladder, "name": ""}},
+        {"proposed": {**edited_ladder, "relationships": {"blob": "x" * 70_000}}},
+        {"proposed": edited_ladder, "action": "skip"},
+        {"proposed": edited_ladder, "edited_fields": ["status"]},
+        {"proposed": edited_ladder, "parent_entry_id": ladder["id"]},
+    ):
+        refused = owner_client.put(draft_url(ladder), json=bad)
+        assert refused.status_code == 422, (bad.keys(), refused.text)
+    unknown = f"{batch_url}/entries/00000000-0000-4000-8000-000000000000/draft"
+    assert owner_client.put(unknown, json=body).status_code == 404
+    first_household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
+    second = owner_client.post(
+        "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
+    )
+    assert second.status_code == 201, second.text
+    other = {"X-Household-Id": second.json()["household"]["id"]}
+    assert owner_client.put(draft_url(ladder), headers=other, json=body).status_code == 404
+    assert owner_client.post(f"/api/v1/households/{first_household}/select").status_code == 200
+    # An account with two households names the household with every change.
+    owner_client.headers["X-Household-Id"] = first_household
+    assert fetch()[1][ladder["id"]]["proposed"] == rows[ladder["id"]]["proposed"]
+
+    # A row that no longer waits does not take a draft: 409, and nothing is stored.
+    skipped = owner_client.post(
+        f"{batch_url}/apply", json={"entries": [{"id": lamp["id"], "action": "skip"}]}
+    )
+    assert skipped.status_code == 200, skipped.text
+    lamp_before = fetch()[1][lamp["id"]]
+    late = owner_client.put(
+        draft_url(lamp), json={"proposed": {**lamp["proposed"], "name": "Late lamp"}}
+    )
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "import_entry_not_pending"
+    assert fetch()[1][lamp["id"]] == lamp_before
+
+    # An empty draft puts the row back as it was read: values and choices.
+    cleared = owner_client.put(draft_url(rope), json={})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["proposed"] == rope["proposed"]
+    assert owner_client.put(draft_url(rope), json={}).json()["proposed"] == rope["proposed"]
+    saved = owner_client.put(draft_url(rope), json={**rope_choice, "proposed": edited_rope})
+    assert saved.status_code == 200, saved.text
+
+    # A later apply uses the kept draft: nothing is sent again but the choices.
+    applied = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {"id": ladder["id"], "action": "import"},
+                {"id": rope["id"], **rope_choice},
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert (applied.json()["created"], applied.json()["merged"]) == (1, 1), applied.json()
+    final = fetch()[1]
+    assert "review_draft" not in final[ladder["id"]]["proposed"]["relationships"]
+    done = owner_client.put(draft_url(ladder), json=body)
+    assert done.status_code == 409
+    assert fetch()[1][ladder["id"]] == final[ladder["id"]]
+
+    created = owner_client.get(
+        f"/api/v1/items/{final[ladder['id']]['imported_item_id']}"
+    ).json()["item"]
+    assert created["name"] == "Step ladder"
+    assert created["quantity"] == 2
+    assert created["description"].startswith("Aluminium, 6 steps")
+    assert (created["brand"], created["model"], created["serial_number"]) == (
+        "Wibe",
+        "55P",
+        "SN-LADDER-1",
+    )
+    assert created["category"]["id"] == tools["id"]
+    assert sorted(tag["name"] for tag in created["tags"]) == ["garage", "tall"]
+    assert created["room"]["id"] == garage["id"]
+    assert created["location"]["id"] == shelf["id"]
+    assert created["purchase"]["price_cents"] == 129900
+    assert created["purchase"]["merchant"] == "Bauhaus"
+    assert created["warranty"]["end_date"] == "2031-03-04"
+    updated = owner_client.get(f"/api/v1/items/{existing_id}").json()["item"]
+    assert updated["name"] == "Old rope"
+    assert (updated["brand"], updated["quantity"]) == ("Beal", 3)
+
+
+def test_draft_is_refused_while_rows_of_the_import_are_being_added(owner_client):
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import ImportBatch
+
+    create_room(owner_client, "Attic")
+    batch = upload_text_import(owner_client, "Ladder in the attic.")
+    detail = process_import(owner_client, batch["id"])
+    entry = detail["entries"][0]
+    url = f"/api/v1/imports/{batch['id']}/entries/{entry['id']}/draft"
+    body = {"proposed": {**entry["proposed"], "name": "Step ladder"}}
+
+    def set_status(value):
+        with SessionLocal() as db:
+            db.get(ImportBatch, batch["id"]).status = value
+            db.commit()
+
+    # The answer is not the same as for a row that is decided: this one can be sent again.
+    set_status("applying")
+    busy = owner_client.put(url, json=body)
+    assert busy.status_code == 409
+    assert busy.json()["detail"]["code"] == "import_busy"
+    set_status("review")
+    assert owner_client.put(url, json=body).status_code == 200
+    stored = owner_client.get(f"/api/v1/imports/{batch['id']}").json()["entries"][0]
+    assert stored["proposed"]["name"] == "Step ladder"

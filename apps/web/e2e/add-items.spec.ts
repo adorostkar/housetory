@@ -191,3 +191,73 @@ test("unified Add items input detects input kinds and preserves context", async 
   await expect(mobilePage).toHaveURL(/\/items\/new/);
   await mobile.close();
 });
+
+test("corrections of a review row are kept across a reload without Skip or Add", async ({
+  page,
+  request,
+}) => {
+  const suffix = crypto.randomUUID().slice(0, 6);
+  const room = await createRoom(request, `Kept draft room ${suffix}`);
+  const read = `Kept draft widget ${suffix}`;
+  const corrected = `Kept draft lamp ${suffix}`;
+  const created = await request.post("/api/v1/imports", {
+    multipart: { text: `- ${read}`, title: `Kept draft ${suffix}`, room_id: room.id },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const batchId = ((await created.json()) as { id: string }).id;
+  const stored = async () => {
+    const detail = (await (await request.get(`/api/v1/imports/${batchId}`)).json()) as {
+      status: string;
+      entries: Array<{ status: string; proposed: { name: string; quantity: number } }>;
+    };
+    return detail;
+  };
+  await expect.poll(async () => (await stored()).status, { timeout: 30_000 }).toBe("review");
+  expect((await stored()).entries).toHaveLength(1);
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/imports/${batchId}`);
+  const row = page.getByRole("article", { name: read, exact: true });
+  await expect(row.getByRole("checkbox", { name: `Select ${read}` })).not.toBeChecked();
+  // A value of a closed row is changed in the bar at the foot of the page.
+  const editor = page.getByTestId("bar-editor");
+  await row.getByRole("button", { name: `Edit name of ${read}` }).click();
+  await editor.getByRole("textbox", { name: `Name of ${read}` }).fill(corrected);
+  await editor.getByRole("button", { name: "Save name" }).click();
+  await expect(editor).toHaveCount(0);
+  const correctedRow = page.getByRole("article", { name: corrected, exact: true });
+  await correctedRow.getByRole("button", { name: `Edit quantity of ${corrected}` }).click();
+  await editor.getByRole("textbox", { name: `Quantity of ${corrected}` }).fill("2");
+  await editor.getByRole("button", { name: "Save quantity" }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(correctedRow.getByRole("button", { name: `Edit quantity of ${corrected}` })).toHaveText("×2");
+
+  // The corrections are kept by themselves: no Skip, no Add, no Save button. The row
+  // still waits, and nothing is in the inventory yet.
+  await expect
+    .poll(async () => {
+      const entry = (await stored()).entries[0]!;
+      return [entry.status, entry.proposed.name, entry.proposed.quantity];
+    })
+    .toEqual(["proposed", corrected, 2]);
+  const listed = async () =>
+    ((await (await request.get(`/api/v1/items?q=${encodeURIComponent(corrected)}`)).json()) as {
+      total: number;
+      items: Array<{ name: string; quantity: number; room: { id: string } | null }>;
+    });
+  expect((await listed()).total).toBe(0);
+
+  await page.reload();
+  await expect(correctedRow).toBeVisible();
+  await expect(page.getByRole("article", { name: read, exact: true })).toHaveCount(0);
+  await expect(correctedRow.getByRole("button", { name: `Edit name of ${corrected}` })).toHaveText(corrected);
+  await expect(correctedRow.getByRole("button", { name: `Edit quantity of ${corrected}` })).toHaveText("×2");
+  await expect(correctedRow.getByRole("checkbox", { name: `Select ${corrected}` })).not.toBeChecked();
+  await expect(page.getByText("Your corrections are not saved yet. Trying again.")).toHaveCount(0);
+
+  // The row is added as it was corrected before the reload.
+  await correctedRow.getByRole("button", { name: "Add item", exact: true }).click();
+  await expect.poll(async () => (await listed()).total).toBe(1);
+  const item = (await listed()).items[0]!;
+  expect([item.name, item.quantity, item.room?.id]).toEqual([corrected, 2, room.id]);
+});

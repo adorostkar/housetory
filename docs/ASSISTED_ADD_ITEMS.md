@@ -60,6 +60,27 @@ draft on the server, so Restore after a reload brings back every edit,
 including the chosen action and its target. A selected row has a background
 and a border as well as its checked box.
 
+A correction on a row that still waits is kept too, without Skip or Add and
+without a button. The app sends the whole draft of the row a short moment
+(about 0.6 seconds) after its last change, and at once when the page is hidden,
+left or closed (`PUT /imports/{batchId}/entries/{entryId}/draft`). The row
+stays as it is: it still waits, nothing is added and no count changes. A
+reload shows the row as it was corrected, with its action and target. This
+is the same for item rows and for room, place and container rows. If a save
+fails, the page keeps what was typed, shows one quiet line and tries again.
+Add and Skip always send the row as it is on the page, so they never wait
+for a save. Two tabs or two people: the last save wins. Within one visit the
+page keeps showing what was typed there; after a reload the server's draft is
+shown. A row that was added, skipped or rejected answers 409 and keeps nothing.
+An empty request puts the row back as it was read.
+
+The server keeps the first reading of a corrected row beside the correction.
+Optional AI suggestions are made for that first reading, so a kept correction
+does not make them out of date: they stay ready, a job that is still running is
+still offered, and Retry still works. **Load suggestions into review** keeps the
+fields the person changed and the choices of the row, and takes the suggestion
+for the rest. Skip is a decision and ends ready suggestions, as before.
+
 A photo review numbers its findings. The vision request also asks for a box
 around each finding. A box that passes the server's checks
 (`services/recognition_geometry.py`) is returned as `source_region`

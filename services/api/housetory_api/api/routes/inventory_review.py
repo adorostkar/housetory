@@ -15,12 +15,14 @@ from ...schemas.inventory_review import (
     ReviewBulkAcceptRequest,
     ReviewDecisionOut,
     ReviewDismissRequest,
+    ReviewDraftRequest,
     ReviewRunOut,
     ReviewRunRequest,
     ReviewScheduleOut,
     ReviewScheduleUpdate,
     ReviewScopeItemsOut,
     ReviewSuggestionListOut,
+    ReviewSuggestionOut,
     ReviewSummaryOut,
 )
 from ...services import inventory_review, inventory_review_schedule
@@ -310,6 +312,32 @@ def dismiss_review_suggestion(
     return result
 
 
+@router.put(
+    "/suggestions/{suggestion_id}/draft",
+    response_model=ReviewSuggestionOut,
+)
+def save_review_suggestion_draft(
+    suggestion_id: uuid.UUID,
+    payload: ReviewDraftRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ReviewSuggestionOut:
+    """Keep an edit of a suggestion that still waits. The suggestion stays as it is."""
+    try:
+        suggestion = inventory_review.save_suggestion_draft(
+            db,
+            auth.household.id,
+            suggestion_id,
+            payload.draft.model_dump(mode="json", exclude_none=True),
+        )
+        result = inventory_review.serialize_suggestion(db, suggestion)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return result
+
+
 @router.post(
     "/suggestions/{suggestion_id}/undo",
     response_model=ReviewDecisionOut,
@@ -347,6 +375,7 @@ def bulk_accept_review_suggestions(
             payload.suggestion_ids,
             actor_user_id=auth.user.id,
             actor_name=auth.user.name,
+            edits=payload.edits,
         )
         db.commit()
     except Exception:

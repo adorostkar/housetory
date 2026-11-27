@@ -1188,6 +1188,11 @@ test.describe("mobile responsive", () => {
     await page.getByRole("button", { name: "Add items" }).click();
     const addDialog = page.getByRole("dialog", { name: "Add items" });
     await expect(addDialog).toBeVisible();
+    // The sheet slides up. It is measured once it rests: while it moves, its
+    // box carries a tiny fraction of a pixel from the movement.
+    await addDialog.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    );
     const box = await addDialog.boundingBox();
     expect(box).not.toBeNull();
     // Below lg the Add items surface is a bottom sheet: full width, anchored
