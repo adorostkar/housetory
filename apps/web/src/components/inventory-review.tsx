@@ -83,7 +83,9 @@ import {
   TYPE_LABELS,
   TYPE_VALUES,
   aiRunSummary,
-  groupByProposedCategory,
+  existingCategoryKey,
+  groupBySharedCategory,
+  newCategoryKey,
   organisationTagNames,
   reviewScopeLabel,
   stringField,
@@ -997,18 +999,35 @@ export function InventoryReview({
     );
   };
 
-  // Waiting proposals for the same category are shown together. A row with an edit of
-  // your own goes with the category it would really get.
-  const suggestionEntries = groupByProposedCategory(suggestions, (suggestion) => {
+  // A category under another one is named with its parents, so that two categories
+  // with the same name can be told apart.
+  const categoryPathLabel = (id: string) => {
+    const names: string[] = [];
+    let entry = categories.find((category) => category.id === id);
+    while (entry && names.length < 8) {
+      names.unshift(entry.name);
+      const parentId = entry.parent_id;
+      entry = parentId ? categories.find((category) => category.id === parentId) : undefined;
+    }
+    return names.length ? names.join(" / ") : null;
+  };
+  // Waiting proposals that lead to the same category are shown together. An existing
+  // category is known by its id, a category that does not exist yet by its name. A row
+  // with an edit of your own goes with the category it would really get.
+  const suggestionEntries = groupBySharedCategory(suggestions, (suggestion) => {
     if (suggestion.status !== "pending") return null;
+    const proposedName = stringField(suggestion.after, "category_name");
+    const proposedId = suggestion.category_id ?? stringField(suggestion.after, "category_id");
     if (suggestion.action_kind === "apply_category") {
       const edited = editDraftFor(suggestion)?.categoryId;
-      return edited
-        ? categories.find((category) => category.id === edited)?.name ?? null
-        : stringField(suggestion.after, "category_name");
+      const id = edited ?? proposedId;
+      const label = id ? categoryPathLabel(id) ?? (edited ? null : proposedName) : null;
+      return id && label ? { key: existingCategoryKey(id), label } : null;
     }
-    return suggestion.action_kind === "apply_organisation"
-      ? stringField(suggestion.after, "category_name") : null;
+    if (suggestion.action_kind !== "apply_organisation" || !proposedName) return null;
+    return proposedId
+      ? { key: existingCategoryKey(proposedId), label: categoryPathLabel(proposedId) ?? proposedName }
+      : { key: newCategoryKey(proposedName), label: proposedName };
   });
 
   return (

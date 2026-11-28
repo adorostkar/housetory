@@ -122,28 +122,40 @@ export type SuggestionEntry<T> =
   | { kind: "single"; suggestion: T }
   | { kind: "group"; key: string; category: string; suggestions: T[] };
 
+/** The category a suggestion would give its item: `key` says which one, `label` names it. */
+export interface SharedCategory {
+  key: string;
+  label: string;
+}
+
+/** An existing category is one record. Two categories can have the same name. */
+export const existingCategoryKey = (id: string) => `id:${id}`;
+
+/** A category that does not exist yet has no id. Proposals share it by name. */
+export const newCategoryKey = (name: string) =>
+  `new:${name.trim().replace(/\s+/g, " ").toLowerCase()}`;
+
 /**
- * Puts suggestions that propose the same category together. A group takes the place of
- * its first suggestion. A category that only one suggestion proposes is not a group.
+ * Puts suggestions that would give their items the same category together. A group takes
+ * the place of its first suggestion. A category that only one suggestion leads to is not
+ * a group.
  */
-export function groupByProposedCategory<T>(
+export function groupBySharedCategory<T>(
   suggestions: T[],
-  categoryOf: (suggestion: T) => string | null,
+  categoryOf: (suggestion: T) => SharedCategory | null,
 ): SuggestionEntry<T>[] {
-  const keyOf = (suggestion: T) =>
-    categoryOf(suggestion)?.trim().replace(/\s+/g, " ").toLowerCase() || null;
+  const shared = new Map(suggestions.map((suggestion) => [suggestion, categoryOf(suggestion)]));
   const members = new Map<string, T[]>();
-  for (const suggestion of suggestions) {
-    const key = keyOf(suggestion);
-    if (key) members.set(key, [...(members.get(key) ?? []), suggestion]);
+  for (const [suggestion, category] of shared) {
+    if (category) members.set(category.key, [...(members.get(category.key) ?? []), suggestion]);
   }
   const placed = new Set<string>();
   return suggestions.flatMap((suggestion): SuggestionEntry<T>[] => {
-    const key = keyOf(suggestion);
-    const group = key ? members.get(key) ?? [] : [];
-    if (!key || group.length < 2) return [{ kind: "single", suggestion }];
-    if (placed.has(key)) return [];
-    placed.add(key);
-    return [{ kind: "group", key, category: categoryOf(suggestion)!.trim(), suggestions: group }];
+    const category = shared.get(suggestion);
+    const group = category ? members.get(category.key) ?? [] : [];
+    if (!category || group.length < 2) return [{ kind: "single", suggestion }];
+    if (placed.has(category.key)) return [];
+    placed.add(category.key);
+    return [{ kind: "group", key: category.key, category: category.label, suggestions: group }];
   });
 }

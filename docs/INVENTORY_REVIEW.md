@@ -163,17 +163,24 @@ category that only repeats one item name is avoided.
   the same category.
 - **Only the selected scope.** The context is built from the reviewed scope: the
   household, property, room, container or the selected items. Items outside the scope,
-  and proposals that wait for them, are never part of it. The household category and
-  tag lists are sent as before.
-- **Scheduled review.** The consent for scheduled AI covers the reviewed items only.
-  A scheduled request gets category names and counts as context, and no names of
-  other items.
+  and proposals that wait for them, are never part of it.
+- **Category lists.** A request lists at most 200 household categories. The ones the
+  selected scope uses come first and the rest are filled in by name, so a category
+  that the context points at is always one the answer may use. An existing category
+  is known by its id, because two categories under different parents can have the
+  same name. A category that does not exist yet is known by its name.
+- **Scheduled review is unchanged.** The consent for scheduled AI covers the reviewed
+  items and the household category and tag lists. A scheduled request sends no scope
+  context: no proposed category names, no counts and no names of other items. Giving
+  schedules this context would need a new consent from the owner.
 - **Decisions during a request.** The context is background. A person can apply or
   skip another suggestion while a request is out; the answer for the batch is still
   used.
-- **Shown together.** In the queue, waiting proposals for the same category are
-  listed together under the category name. Each proposal keeps its own **Apply** and
-  **Skip**. **Apply group (n)** applies the proposals shown in the group. A new
+- **Shown together.** In the queue, waiting proposals that lead to the same category
+  are listed together under the category name. A category under another one is shown
+  with its parents (*Camping / Accessories*). A proposal with a kept **Edit first**
+  choice goes with the category that was chosen. Each proposal keeps its own **Apply**
+  and **Skip**. **Apply group (n)** applies the proposals shown in the group. A new
   category is created once, when the first of them is applied.
 - **Nothing changes without approval.** Analysis never creates a category and never
   changes an item. A group is applied only when a person presses **Apply group**, and
@@ -217,8 +224,7 @@ on-demand AI review do **not** enable it. The consent text states that one
 bounded request per run sends at most 40 items needing a category or tags from the
 selected scope to the current Assistant provider. Only names, descriptions, brand/model,
 current category/tag names and existing household category/tag vocabularies are
-included, with the names of categories proposed for the scope and a count of items for
-each; names of other items are not included; photos, locations, receipts, loans, prices, private notes, borrower data and
+included; photos, locations, receipts, loans, prices, private notes, borrower data and
 other households are excluded. It also states that the provider may charge usage or
 cost; Housetory does not invent a cost estimate.
 

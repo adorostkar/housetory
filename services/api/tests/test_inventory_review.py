@@ -2097,6 +2097,143 @@ def test_ai_context_stays_inside_the_selected_scope(owner_client, configured_ai,
             assert outsider not in prompt
 
 
+def test_proposals_for_two_categories_with_one_name_are_not_listed_as_one_group(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+
+    def child(parent_name):
+        parent = create_category(client, parent_name)
+        response = client.post(
+            "/api/v1/categories", json={"name": "Accessories", "parent_id": parent["id"]}
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    camping, workshop = child("Camping"), child("Workshop")
+    tools = create_category(client, "Tools")
+    create_item(client, "Headlamp", room["id"])
+    create_item(client, "Camp mug", room["id"])
+    create_item(client, "Bench vise", room["id"])
+    # The rule proposes Tools for the second tarp. The pair is also a duplicate finding.
+    create_item(client, "Tarp", room["id"], category_id=tools["id"])
+    create_item(client, "Tarp", room["id"])
+    answers = {
+        "Headlamp": {"category": {"id": camping["id"]}, "confidence": "high"},
+        "Camp mug": {"category": {"id": camping["id"]}},
+        "Bench vise": {"category": {"id": workshop["id"]}},
+    }
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda _system, prompt, **_kwargs: {
+            "suggestions": [
+                {
+                    "index": record["index"],
+                    **answers.get(record["name"], {"no_category_reason": "Not stated."}),
+                }
+                for record in sent_items(prompt)
+            ]
+        },
+    )
+    assert run_review(client, include_ai=True).json()["status"] == "completed"
+
+    def listed():
+        return [
+            (row["type"], row["item"]["name"], row["after"].get("category_id"))
+            for row in suggestions(client)["items"]
+        ]
+
+    # One group per category record: the vise is not pulled up beside the headlamp.
+    assert listed() == [
+        ("category", "Tarp", tools["id"]),
+        ("organisation", "Headlamp", camping["id"]),
+        ("organisation", "Camp mug", camping["id"]),
+        ("possible_duplicate", "Tarp", None),
+        ("organisation", "Bench vise", workshop["id"]),
+    ]
+
+    # A kept "Edit first" choice decides which category a proposal belongs to.
+    tarp = next(row for row in suggestions(client)["items"] if row["type"] == "category")
+    kept = put_draft(
+        client,
+        f"/api/v1/inventory-review/suggestions/{tarp['id']}/draft",
+        json={"draft": {"category_id": workshop["id"]}},
+    )
+    assert kept.status_code == 200, kept.text
+    assert listed() == [
+        ("category", "Tarp", tools["id"]),
+        ("organisation", "Bench vise", workshop["id"]),
+        ("organisation", "Headlamp", camping["id"]),
+        ("organisation", "Camp mug", camping["id"]),
+        ("possible_duplicate", "Tarp", None),
+    ]
+
+
+def test_a_category_the_context_offers_is_accepted_beyond_the_alphabetical_cutoff(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    household = client.get("/api/v1/auth/session").json()["household"]["id"]
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Category(household_id=uuid.UUID(household), name=f"A category {index:03}")
+                for index in range(200)
+            ]
+        )
+        db.commit()
+    outdoor = create_category(client, "Z Outdoor gear")
+    sorted_tag = create_tag(client, "sorted")
+    create_item(
+        client, "Family tent", room["id"], category_id=outdoor["id"], tag_ids=[sorted_tag["id"]]
+    )
+    pillows = create_item(client, "Camp pillows", room["id"])
+    prompts = []
+
+    def complete(_system, prompt, **_kwargs):
+        prompts.append(prompt)
+        offered = inventory_context(prompt)["categories"][0]
+        return {
+            "suggestions": [
+                {"index": record["index"], "category": {"id": offered["id"]}}
+                for record in sent_items(prompt)
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = run_review(client, include_ai=True).json()
+    assert (run["status"], run["partial_reason"]) == ("completed", None)
+    assert [record["name"] for record in sent_items(prompts[0])] == ["Camp pillows"]
+    listed = json.loads(
+        next(
+            line.removeprefix("Categories: ")
+            for line in prompts[0].splitlines()
+            if line.startswith("Categories: ")
+        )
+    )
+    # The list keeps its bound, and the category the scope uses has a place in it.
+    assert len(listed) == 200
+    assert outdoor["id"] in {entry["id"] for entry in listed}
+    assert inventory_context(prompts[0])["categories"] == [
+        {
+            "name": "Z Outdoor gear",
+            "id": outdoor["id"],
+            "item_count": 1,
+            "examples": ["Family tent"],
+        }
+    ]
+    assert [
+        (row["item_id"], row["after"]["category_id"]) for row in organisation_suggestions(client)
+    ] == [(pillows["id"], outdoor["id"])]
+
+
 def test_ai_organisation_skips_when_no_eligible_items(owner_client, monkeypatch):
     client = owner_client
     room = create_room(client)

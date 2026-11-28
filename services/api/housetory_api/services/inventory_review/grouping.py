@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import Counter
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -28,53 +30,45 @@ MAX_CONTEXT_NAME_LENGTH = 80
 CONTEXT_PREFIX = "Inventory context: "
 
 
-def _distinct_names(names: list[str], limit: int) -> list[str]:
-    distinct = {_normalized(name): name[:MAX_CONTEXT_NAME_LENGTH] for name in sorted(names)}
-    return [distinct[key] for key in sorted(distinct) if key][:limit]
+@dataclass
+class ScopeUsage:
+    """How the selected scope uses categories: its items and the proposals that wait."""
+
+    # (item id, item name, category id or None)
+    items: list[tuple[uuid.UUID, str, uuid.UUID | None]]
+    # (item id, proposed category name, id of an existing category or None)
+    proposals: list[tuple[uuid.UUID, str, uuid.UUID | None]]
+
+    def category_ids(self) -> list[uuid.UUID]:
+        """Existing categories the scope uses or is proposed to use, most used first."""
+        counts = Counter(
+            [category_id for _item, _name, category_id in self.items if category_id]
+            + [category_id for _item, _name, category_id in self.proposals if category_id]
+        )
+        return sorted(counts, key=lambda category_id: (-counts[category_id], str(category_id)))
 
 
-def scope_context(
+def scope_usage(
     db: Session,
     household_id: uuid.UUID,
     *,
     conditions: list[Any] | None,
     items: list[Item],
-    sent_ids: set[uuid.UUID],
-    item_names: bool,
-) -> dict[str, Any]:
-    """Categories used or proposed in the selected scope, and what is still uncategorised.
+) -> ScopeUsage:
+    """Read the selected scope once.
 
     ``conditions`` select the whole scope of a batched review; without them the loaded
-    ``items`` are the scope. Items in the current request are left out, because the
-    model answers for those. With ``item_names`` off, only category names and counts are
-    given.
+    ``items`` are the scope. Proposals for items outside the scope are left out.
     """
     if conditions is not None:
-        rows = db.execute(
-            select(Item.id, Item.name, Item.category_id, Category.name)
-            .outerjoin(Category, Category.id == Item.category_id)
-            .where(*conditions)
-        ).all()
-    else:
         rows = [
-            (item.id, item.name, item.category_id, item.category.name if item.category else None)
-            for item in items
+            tuple(row)
+            for row in db.execute(select(Item.id, Item.name, Item.category_id).where(*conditions))
         ]
-    names = {item_id: name for item_id, name, _category_id, _category in rows}
-    groups: dict[str, dict[str, Any]] = {}
-
-    def add(category_id: Any, label: str, item_id: uuid.UUID) -> None:
-        # A proposed category has no id yet; its name is what related proposals share.
-        key = str(category_id) if category_id else f"new:{_normalized(label)}"
-        group = groups.setdefault(
-            key, {"name": label, "id": str(category_id) if category_id else None, "items": []}
-        )
-        group["items"].append(names[item_id])
-
-    for item_id, _name, category_id, category in rows:
-        if item_id not in sent_ids and category_id is not None and category:
-            add(category_id, category, item_id)
-    proposed: set[uuid.UUID] = set()
+    else:
+        rows = [(item.id, item.name, item.category_id) for item in items]
+    in_scope = {item_id for item_id, _name, _category_id in rows}
+    proposals: list[tuple[uuid.UUID, str, uuid.UUID | None]] = []
     for item_id, after in db.execute(
         select(InventoryReviewSuggestion.item_id, InventoryReviewSuggestion.after_json)
         .where(
@@ -86,13 +80,57 @@ def scope_context(
         .order_by(InventoryReviewSuggestion.created_at, InventoryReviewSuggestion.id)
     ).all():
         label = (after or {}).get("category_name")
-        # Proposals for items outside the selected scope are not context.
-        if item_id in sent_ids or item_id not in names:
+        if item_id not in in_scope or not isinstance(label, str) or not _normalized(label):
             continue
-        if not isinstance(label, str) or not _normalized(label):
+        try:
+            category_id = uuid.UUID(str(after["category_id"])) if after.get("category_id") else None
+        except ValueError:
             continue
-        add((after or {}).get("category_id"), label.strip(), item_id)
-        proposed.add(item_id)
+        proposals.append((item_id, label.strip(), category_id))
+    return ScopeUsage(items=rows, proposals=proposals)
+
+
+def _distinct_names(names: list[str], limit: int) -> list[str]:
+    distinct = {_normalized(name): name[:MAX_CONTEXT_NAME_LENGTH] for name in sorted(names)}
+    return [distinct[key] for key in sorted(distinct) if key][:limit]
+
+
+def scope_context(
+    usage: ScopeUsage,
+    *,
+    sent_ids: set[uuid.UUID],
+    offered: dict[uuid.UUID, Category],
+) -> dict[str, Any]:
+    """Categories used or proposed in the scope, and what is still uncategorised.
+
+    Items in the current request are left out, because the model answers for those. An
+    existing category is one record, known by its id: two categories can have the same
+    name. Only ids in ``offered`` are given, which are the ids an answer may use. A
+    proposed category has no id yet; its name is what related proposals share.
+    """
+    names = {item_id: name for item_id, name, _category_id in usage.items}
+    groups: dict[str, dict[str, Any]] = {}
+
+    def add(category_id: uuid.UUID | None, label: str, item_id: uuid.UUID) -> None:
+        if item_id in sent_ids:
+            return
+        if category_id is not None:
+            if category_id not in offered:
+                return
+            key, label = str(category_id), offered[category_id].name
+        else:
+            key = f"new:{_normalized(label)}"
+        group = groups.setdefault(
+            key, {"name": label, "id": str(category_id) if category_id else None, "items": []}
+        )
+        group["items"].append(names[item_id])
+
+    for item_id, _name, category_id in usage.items:
+        if category_id is not None:
+            add(category_id, "", item_id)
+    for item_id, label, category_id in usage.proposals:
+        add(category_id, label, item_id)
+    proposed = {item_id for item_id, _label, _category_id in usage.proposals}
 
     ordered = sorted(
         groups.values(),
@@ -105,25 +143,20 @@ def scope_context(
                 "name": group["name"][:MAX_CONTEXT_NAME_LENGTH],
                 "id": group["id"],
                 "item_count": len(group["items"]),
-                **(
-                    {"examples": _distinct_names(group["items"], MAX_CONTEXT_EXAMPLES)}
-                    if item_names
-                    else {}
-                ),
+                "examples": _distinct_names(group["items"], MAX_CONTEXT_EXAMPLES),
             }
             for group in ordered
         ]
-    if item_names:
-        uncategorised = _distinct_names(
-            [
-                name
-                for item_id, name, category_id, _category in rows
-                if category_id is None and item_id not in sent_ids and item_id not in proposed
-            ],
-            MAX_CONTEXT_NAMES,
-        )
-        if uncategorised:
-            context["other_uncategorised_items"] = uncategorised
+    uncategorised = _distinct_names(
+        [
+            name
+            for item_id, name, category_id in usage.items
+            if category_id is None and item_id not in sent_ids and item_id not in proposed
+        ],
+        MAX_CONTEXT_NAMES,
+    )
+    if uncategorised:
+        context["other_uncategorised_items"] = uncategorised
     return context
 
 

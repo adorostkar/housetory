@@ -467,7 +467,7 @@ def test_scheduled_ai_uses_one_bounded_provider_request(owner_client, monkeypatc
     finish_job(job_id, result)
     assert result["ai_used"] is True
     assert len(calls) == 1
-    # Scheduled consent covers the 40 reviewed items: no other item is named as context.
+    # Scheduled consent covers the 40 reviewed items: no other item is named.
     assert sum(f"Bounded item {index:02d}" in calls[0][0] for index in range(45)) == 40
     with SessionLocal() as db:
         run = db.get(InventoryReviewRun, uuid.UUID(result["run_id"]))
@@ -476,6 +476,50 @@ def test_scheduled_ai_uses_one_bounded_provider_request(owner_client, monkeypatc
         assert run.total_item_count == 45
         assert "first 40" in (run.partial_reason or "")
         assert run.ai_item_count == 40
+
+
+def test_scheduled_ai_keeps_its_consented_payload_without_scope_context(owner_client, monkeypatch):
+    """Scheduled consent was given for the reviewed items and the household taxonomy.
+
+    An on-demand review also sends context about the rest of the scope. A schedule that
+    was saved under the scheduled consent must not start to send that.
+    """
+    client = owner_client
+    household_id = current_household_id(client)
+    room = create_room(client)
+    create_item(client, "Family tent", room["id"])
+    configure_assistant(client)
+    saved = put_schedule(client, include_ai=True, ai_consent=True, max_runs_per_day=4)
+    assert saved.status_code == 200, saved.text
+    prompts = []
+
+    def fake_complete_json(_system, prompt, *, config):
+        prompts.append(prompt)
+        return {
+            "suggestions": [
+                {"index": 0, "category": {"name": "Weekend trips"}, "reason": "Fixture."}
+            ]
+        }
+
+    def run_due_job():
+        set_due(household_id, datetime.now(UTC) - timedelta(minutes=1))
+        assert dispatch() == 1
+        job_id, payload = claim_schedule_job()
+        assert job_id is not None
+        result = run_schedule_job(payload)
+        finish_job(job_id, result)
+        assert result["ai_used"] is True
+
+    monkeypatch.setattr(inventory_review.ai, "complete_json", fake_complete_json)
+    run_due_job()
+    # The tent now has a waiting proposal with a label the model made up. The next run
+    # reviews only the new item; the tent is not selected again.
+    create_item(client, "Camp pillows", room["id"])
+    run_due_job()
+    assert len(prompts) == 2
+    assert "Camp pillows" in prompts[1]
+    for unsent in ("Inventory context", "Family tent", "Weekend trips"):
+        assert unsent not in prompts[1]
 
 
 def test_schedule_caps_rotation_and_cross_household_scope_are_enforced(owner_client):
