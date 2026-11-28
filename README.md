@@ -754,6 +754,15 @@ the first owner exists, any client that can reach it can claim it.
 The app shell is cached; inventory and API responses are deliberately never
 cached by the service worker.
 
+### Offline copy (optional, per device)
+
+A person can turn on **Settings → Offline copy** to keep a read-only copy of
+the open household on that device. Without a connection to the server, items,
+rooms, storage places and search still work; nothing can be changed. It is off
+by default, needs a secure address (https or `localhost`), and the copy is
+removed at sign-out. The owner decides which roles may keep a copy. See
+[`docs/OFFLINE_COPY.md`](docs/OFFLINE_COPY.md).
+
 ## Configuration
 
 Copy `.env.example` to `.env`. Compose reads this file for variable substitution.
@@ -1304,6 +1313,11 @@ docker compose down                   # stop, keep data
   `POST /evidence-exports`, household-scoped status/cancel/retry/list routes and
   authenticated PDF/CSV/ZIP downloads. They use the existing durable worker and
   a separate private exports volume.
+- The offline copy adds `GET /offline/snapshot` (the whole household in the
+  shapes of the normal read routes, with an `ETag`) and
+  `GET /offline/photos/{id}` (a small photo). Both answer
+  `403 offline_copy_not_allowed` when the household's `offline_copy_policy`
+  does not allow a copy for the role. There is no offline write route.
 - Stocktake adds household-scoped session start/list/detail, observation,
   refresh, review/apply, complete/abandon and compact scope-summary routes. The
   checklist, review and finish UI lives at `/stocktake/{sessionId}`. It is

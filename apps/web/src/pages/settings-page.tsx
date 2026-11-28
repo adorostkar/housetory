@@ -1,6 +1,7 @@
 import {
   Activity,
   ChevronRight,
+  CloudOff,
   Home,
   LogOut,
   Palette,
@@ -18,8 +19,10 @@ import { PALETTES, useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatSavedAt } from "@/components/offline-banner";
 import { getApiErrorMessage } from "@/lib/api";
 import { clearAllItemDrafts } from "@/lib/item-drafts";
+import { useOfflineStatus } from "@/lib/offline/controller";
 import { useLogout, useSession, useSystemStatusSummary } from "@/lib/queries";
 
 /**
@@ -84,7 +87,8 @@ function SettingsGroup({
   children: React.ReactNode;
 }) {
   return (
-    <section aria-labelledby={id}>
+    // min-w-0: a long word in a row (an e-mail address) wraps instead of widening the page.
+    <section aria-labelledby={id} className="min-w-0">
       <h2 id={id} className="eyebrow mb-2 px-1">
         {title}
       </h2>
@@ -100,6 +104,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const logout = useLogout();
   const { theme, palette } = useTheme();
+  const offline = useOfflineStatus();
   const isOwner = session.data?.role === "owner";
   const health = useSystemStatusSummary(isOwner);
 
@@ -156,6 +161,18 @@ export function SettingsPage() {
             icon={Palette}
             title="Appearance"
             summary={`${paletteName} · ${MODE_LABELS[theme]}`}
+          />
+          <SettingsRow
+            to="/settings/offline"
+            icon={CloudOff}
+            title="Offline copy"
+            summary={
+              !offline.enabled
+                ? "Off. Look up your things without a connection."
+                : offline.info
+                  ? `On this device · saved ${formatSavedAt(offline.info.savedAt)}`
+                  : "On this device · no copy saved yet"
+            }
           />
         </SettingsGroup>
 
@@ -221,6 +238,7 @@ export function SettingsPage() {
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
               End this session on this device.
+              {offline.enabled && " The offline copy is removed too."}
             </p>
           </div>
           <Button

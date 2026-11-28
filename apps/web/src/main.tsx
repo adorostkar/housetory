@@ -8,11 +8,20 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ApiError, householdScopedQueryHash } from "@/lib/api";
 import { NavigationGuardProvider } from "@/lib/navigation-guard";
+import { startOffline } from "@/lib/offline/controller";
 import "@/styles/globals.css";
+
+// Before the first request: it decides if that request can be answered from the copy.
+startOffline();
 
 const queryClient = new QueryClient({
   defaultOptions: {
+    // Requests are always made, also when the browser says it is offline. The
+    // API client then answers from the offline copy, or fails at once. Without
+    // this, reads would wait and changes would be sent later without a word.
+    mutations: { networkMode: "always" },
     queries: {
+      networkMode: "always",
       queryKeyHashFn: householdScopedQueryHash,
       staleTime: 30_000,
       retry: (failureCount, error) => {
@@ -48,8 +57,19 @@ createRoot(rootElement).render(
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
-      console.warn("Housetory service worker registration failed", error);
-    });
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(() => navigator.serviceWorker.ready)
+      .then((registration) => {
+        // A worker that was active before this page loaded (after a forced
+        // reload, for one) does not take the page by itself. Ask it to, so the
+        // app can be opened from the device the next time.
+        if (!navigator.serviceWorker.controller) {
+          registration.active?.postMessage({ type: "housetory-claim" });
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("Housetory service worker registration failed", error);
+      });
   });
 }

@@ -16,6 +16,26 @@ export function householdScopedQueryHash(queryKey: readonly unknown[]) {
   return `${activeHouseholdId ?? "none"}:${JSON.stringify(queryKey)}`;
 }
 
+/**
+ * The offline copy plugs in here (see `lib/offline/controller.ts`). Without it,
+ * every request goes to the server as before.
+ */
+export interface OfflineGate {
+  /** Answers a request from the copy, or returns nothing to let it reach the server. */
+  intercept(method: string, path: string): Promise<{ data: unknown } | undefined>;
+  /** The network failed. May answer from the copy instead. */
+  onNetworkFailure(method: string, path: string): Promise<{ data: unknown } | undefined>;
+  /** Lets a request that hangs be given up for the copy. */
+  watch(method: string): { offline: Promise<void>; done(): void } | null;
+  onResponse(method: string, path: string, ok: boolean): void;
+}
+
+let offlineGate: OfflineGate | null = null;
+
+export function setOfflineGate(gate: OfflineGate | null) {
+  offlineGate = gate;
+}
+
 function withHouseholdContext(headers: Headers) {
   if (activeHouseholdId) headers.set("X-Household-Id", activeHouseholdId);
 }
@@ -64,11 +84,24 @@ async function parseError(response: Response): Promise<ApiError> {
   );
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+const NETWORK_ERROR_MESSAGE =
+  "Housetory can't reach the server. Check your connection and try again.";
+
+/**
+ * Sends a request to the server, unless the offline copy answers it. Returns the
+ * server's response, or `{ data }` when the answer came from the copy.
+ */
+async function send(
+  path: string,
+  options: RequestOptions,
+): Promise<{ response: Response } | { data: unknown }> {
   const { body, formData, skipUnauthorizedEvent, headers, ...rest } = options;
+  const method = (rest.method ?? "GET").toUpperCase();
+  const answered = await offlineGate?.intercept(method, path);
+  if (answered) return answered;
+
   const requestHeaders = new Headers(headers);
   let payload: BodyInit | undefined;
-
   if (formData) {
     payload = formData;
   } else if (body !== undefined) {
@@ -77,25 +110,47 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
   withHouseholdContext(requestHeaders);
 
+  // Our own signal, so a request given up for the copy does not stay open.
+  const abort = new AbortController();
+  const onCallerAbort = () => abort.abort(rest.signal?.reason);
+  if (rest.signal?.aborted) onCallerAbort();
+  else rest.signal?.addEventListener("abort", onCallerAbort, { once: true });
+  const watch = offlineGate?.watch(method) ?? null;
+
   let response: Response;
   try {
-    response = await fetch(`${API_PREFIX}${path}`, {
+    const fetching = fetch(`${API_PREFIX}${path}`, {
       ...rest,
       headers: requestHeaders,
       body: payload,
       credentials: "include",
+      signal: abort.signal,
     });
+    const first = watch
+      ? await Promise.race([fetching, watch.offline.then(() => null)])
+      : await fetching;
+    if (first === null) {
+      fetching.catch(() => undefined);
+      abort.abort();
+      const fromCopy = await offlineGate?.intercept(method, path);
+      if (fromCopy) return fromCopy;
+      throw new ApiError(0, "network_error", NETWORK_ERROR_MESSAGE);
+    }
+    response = first;
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     if (rest.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw error;
     }
-    throw new ApiError(
-      0,
-      "network_error",
-      "Housetory can't reach the server. Check your connection and try again.",
-    );
+    const fromCopy = await offlineGate?.onNetworkFailure(method, path);
+    if (fromCopy) return fromCopy;
+    throw new ApiError(0, "network_error", NETWORK_ERROR_MESSAGE);
+  } finally {
+    watch?.done();
+    rest.signal?.removeEventListener("abort", onCallerAbort);
   }
 
+  offlineGate?.onResponse(method, path, response.ok);
   if (!response.ok) {
     const error = await parseError(response);
     if (
@@ -109,56 +164,23 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
     throw error;
   }
+  return { response };
+}
 
-  if (response.status === 204) {
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const result = await send(path, options);
+  if ("data" in result) return result.data as T;
+  if (result.response.status === 204) {
     return undefined as T;
   }
-
-  return (await response.json()) as T;
+  return (await result.response.json()) as T;
 }
 
 async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
-  const { body, formData, skipUnauthorizedEvent, headers, ...rest } = options;
-  const requestHeaders = new Headers(headers);
-  let payload: BodyInit | undefined;
-  if (formData) payload = formData;
-  else if (body !== undefined) {
-    requestHeaders.set("Content-Type", "application/json");
-    payload = JSON.stringify(body);
-  }
-  withHouseholdContext(requestHeaders);
-  let response: Response;
-  try {
-    response = await fetch(`${API_PREFIX}${path}`, {
-      ...rest,
-      headers: requestHeaders,
-      body: payload,
-      credentials: "include",
-    });
-  } catch (error) {
-    if (rest.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
-      throw error;
-    }
-    throw new ApiError(
-      0,
-      "network_error",
-      "Housetory can't reach the server. Check your connection and try again.",
-    );
-  }
-  if (!response.ok) {
-    const error = await parseError(response);
-    if (
-      error.code === "household_context_changed" ||
-      error.code === "household_context_required" ||
-      error.code === "household_access_revoked"
-    ) {
-      window.dispatchEvent(new Event(HOUSEHOLD_CONTEXT_EVENT));
-    } else if (error.status === 401 && !skipUnauthorizedEvent) {
-      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
-    }
-    throw error;
-  }
-  return response.blob();
+  const result = await send(path, options);
+  // The copy holds records, not files. A file asked for offline was refused in `send`.
+  if ("data" in result) throw new ApiError(0, "offline_unavailable", NETWORK_ERROR_MESSAGE);
+  return result.response.blob();
 }
 
 export const api = {

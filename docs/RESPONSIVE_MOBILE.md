@@ -150,7 +150,9 @@ Simulator record") the rules are these:
   phone assistant sheet is the one exception; its field is at its bottom.
 - The service worker tells the browser to send `/api/*` straight to the
   network where the browser supports that, so a save sent while the page is
-  left does not pass through the worker.
+  left does not pass through the worker. Pictures from the API are the one
+  exception: on a device with an offline copy, a saved small photo stands in
+  when the server does not answer.
 
 ## Dialogs and fixed controls
 

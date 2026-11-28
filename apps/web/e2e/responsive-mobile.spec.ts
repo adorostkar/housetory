@@ -887,6 +887,7 @@ test.describe("mobile responsive", () => {
       // Row title, where it leads, the heading of that screen.
       ["Account", "/settings/account", "Your account"],
       ["Appearance", "/settings/appearance", "Appearance"],
+      ["Offline copy", "/settings/offline", "Offline copy"],
       ["Household", "/settings/household", "Household"],
       ["Members and invitations", "/settings/members", "Members & invitations"],
       ["AI and online services", "/settings/services", "AI and online services"],

@@ -59,6 +59,10 @@ class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "default_currency ~ '^[A-Z]{3}$'",
             name="default_currency_format",
         ),
+        CheckConstraint(
+            "offline_copy_policy in ('nobody', 'members', 'everyone')",
+            name="offline_copy_policy",
+        ),
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -74,6 +78,11 @@ class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     item_image_daily_generation_cap: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="10"
+    )
+    # Who may keep a read-only copy of the inventory on a device: "nobody",
+    # "members" (owners and members, not viewers) or "everyone".
+    offline_copy_policy: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="members"
     )
 
     members: Mapped[list["HouseholdMember"]] = relationship(

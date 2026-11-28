@@ -1,4 +1,5 @@
 import type { MemberRole, UUID } from "@/lib/types/core";
+import type { OfflineCopyPolicy } from "@/lib/types/offline";
 
 export interface User {
   id: UUID;
@@ -13,6 +14,7 @@ export interface Household {
   default_currency: string;
   warranty_reminder_days: number;
   item_image_auto_reference?: boolean;
+  offline_copy_policy?: OfflineCopyPolicy;
 }
 
 export interface HouseholdMembership extends Household {
@@ -27,6 +29,8 @@ export interface SessionState {
   user: User | null;
   household: Household | null;
   role: MemberRole | null;
+  /** Whether this account may keep an offline copy of the selected household. */
+  offline_copy_allowed?: boolean;
   households?: HouseholdMembership[];
 }
 

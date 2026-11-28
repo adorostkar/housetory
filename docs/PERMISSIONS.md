@@ -29,6 +29,8 @@ membership again. A session stores the selected household id, not a global role.
 | Read properties and property-scoped inventory | Yes | Yes | Yes |
 | Create, rename, archive or delete properties; move room subtrees across properties | Yes | Yes | No |
 | Manage household name and reminder settings | Yes | No | No |
+| Keep a read-only offline copy of the household on a device (`GET /offline/snapshot`) | Yes, unless the owner chose "Nobody" | Yes, unless the owner chose "Nobody" | Only if the owner chose "Everyone" |
+| Choose who may keep an offline copy | Yes | No | No |
 | Manage AI providers, credentials, task models and consent | Yes | No | No |
 | Invite, revoke, resend, remove members and change roles | Yes | No | No |
 | Manage own account name/password | Yes | Yes | Yes |

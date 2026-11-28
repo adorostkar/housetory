@@ -204,6 +204,14 @@ private response without revalidation.
 **Fix.** Photos, thumbnails, documents and API JSON use `private, no-store` (or
 API `no-store`). The service worker explicitly never caches `/api/`.
 
+**Later addition.** A person can now choose to keep an offline copy on a device
+(`docs/OFFLINE_COPY.md`). Then the page itself stores one household in IndexedDB
+and one small photo per item in Cache Storage. This is off by default, allowed
+per role by the owner, removed at sign-out, and removed after 30 days without
+contact with the server. The service worker still never writes an API response
+to a cache. A copy on a device that never reaches the server again cannot be
+removed from far away before those 30 days.
+
 **Evidence.** Header assertions in `test_media.py` and `test_auth.py`; live
 response inspections.
 

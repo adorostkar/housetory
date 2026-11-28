@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -36,6 +37,9 @@ class LoginRequest(BaseModel):
         return value.strip().lower()
 
 
+OfflineCopyPolicy = Literal["nobody", "members", "everyone"]
+
+
 class UserOut(ORMModel):
     id: uuid.UUID
     name: str
@@ -49,6 +53,7 @@ class HouseholdOut(ORMModel):
     default_currency: str = "USD"
     warranty_reminder_days: int = 30
     item_image_auto_reference: bool = False
+    offline_copy_policy: OfflineCopyPolicy = "members"
 
 
 class HouseholdUpdate(BaseModel):
@@ -56,6 +61,7 @@ class HouseholdUpdate(BaseModel):
     default_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     warranty_reminder_days: int | None = Field(default=None, ge=1, le=3650)
     item_image_auto_reference: bool | None = None
+    offline_copy_policy: OfflineCopyPolicy | None = None
 
 
 class SessionState(BaseModel):
@@ -64,6 +70,8 @@ class SessionState(BaseModel):
     user: UserOut | None = None
     household: HouseholdOut | None = None
     role: str | None = None
+    # Whether this account may keep an offline copy of the selected household.
+    offline_copy_allowed: bool = False
     households: list[HouseholdMembershipOut] = Field(default_factory=list)
 
 

@@ -15,3 +15,4 @@ export * from "@/lib/types/activity";
 export * from "@/lib/types/bulk";
 export * from "@/lib/types/evidence";
 export * from "@/lib/types/stocktake";
+export * from "@/lib/types/offline";

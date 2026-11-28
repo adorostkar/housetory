@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..models import AuthSession, Household, HouseholdMember, Property, User
-from ..schemas.auth import HouseholdOut, SessionState, UserOut
+from ..schemas.auth import SessionState, UserOut
 from ..schemas.households import HouseholdMembershipOut
 from ..security import (
     dummy_verify,
@@ -16,6 +16,7 @@ from ..security import (
     password_needs_rehash,
     verify_password,
 )
+from .households import household_out, offline_copy_allowed
 
 
 def count_users(db: Session) -> int:
@@ -138,18 +139,11 @@ def build_session_state(
         authenticated=True,
         setup_required=setup_needed,
         user=UserOut.model_validate(user),
-        household=(
-            HouseholdOut(
-                id=chosen[0].id,
-                name=chosen[0].name,
-                default_currency=chosen[0].default_currency,
-                warranty_reminder_days=chosen[0].warranty_reminder_days,
-                item_image_auto_reference=chosen[0].item_image_auto_reference,
-            )
-            if chosen is not None
-            else None
-        ),
+        household=household_out(chosen[0]) if chosen is not None else None,
         role=chosen[1].role if chosen is not None else None,
+        offline_copy_allowed=(
+            offline_copy_allowed(chosen[0], chosen[1].role) if chosen is not None else False
+        ),
         households=[
             HouseholdMembershipOut(
                 id=household.id,

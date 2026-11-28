@@ -8,6 +8,12 @@ import {
 
 import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
 import { captureInProgress, type CaptureReview } from "@/lib/assistant-task-events";
+import {
+  getOfflineStatus,
+  removeOfflineCopyOnSignOut,
+  signOutOffline,
+  useOfflineStatus,
+} from "@/lib/offline/controller";
 import { setStoredPropertyId } from "@/lib/property-filter-store";
 import { localDateISO } from "@/lib/utils";
 import type {
@@ -678,12 +684,37 @@ export function useInvalidateInventory(
 export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<void>("/auth/logout"),
-    onSuccess: () => {
+    mutationFn: async (): Promise<"server" | "device"> => {
+      if (getOfflineStatus().online) {
+        try {
+          await api.post<void>("/auth/logout");
+          return "server";
+        } catch (error) {
+          // The request itself found the server gone, and a copy is on the device.
+          if (getOfflineStatus().online) throw error;
+        }
+      }
+      // No server to tell. The copy goes now; the session ends at the next contact.
+      await signOutOffline();
+      return "device";
+    },
+    onSuccess: async (how) => {
+      await removeOfflineCopyOnSignOut();
       queryClient.removeQueries({
         predicate: (query) => query.queryKey[0] !== "session",
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+      if (how === "server") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+        return;
+      }
+      queryClient.setQueryData<SessionState>(queryKeys.session, {
+        authenticated: false,
+        setup_required: false,
+        user: null,
+        household: null,
+        role: null,
+        households: [],
+      });
     },
   });
 }
@@ -998,9 +1029,17 @@ export function useLocationPhotos(locationId: string | undefined) {
   });
 }
 
-export function useCanWrite() {
+/** The role allows changes. True also while offline; see `useCanWrite`. */
+export function useIsWriter() {
   const session = useSession();
   return session.data?.role === "owner" || session.data?.role === "member";
+}
+
+/** Changes can be made now: the role allows them and the server can be reached. */
+export function useCanWrite() {
+  const writer = useIsWriter();
+  const { online } = useOfflineStatus();
+  return writer && online;
 }
 
 export function useHouseholdMembers() {

@@ -4,19 +4,14 @@ from sqlalchemy.orm import Session
 from ...api.deps import AuthContext, require_auth, require_owner
 from ...db import get_db
 from ...schemas.auth import HouseholdOut, HouseholdUpdate
+from ...services.households import household_out
 
 router = APIRouter(prefix="/household", tags=["household"])
 
 
 @router.get("", response_model=HouseholdOut)
 def get_household(auth: AuthContext = Depends(require_auth)) -> HouseholdOut:
-    return HouseholdOut(
-        id=auth.household.id,
-        name=auth.household.name,
-        default_currency=auth.household.default_currency,
-        warranty_reminder_days=auth.household.warranty_reminder_days,
-        item_image_auto_reference=auth.household.item_image_auto_reference,
-    )
+    return household_out(auth.household)
 
 
 @router.patch("", response_model=HouseholdOut)
@@ -39,11 +34,7 @@ def update_household(
         and payload.item_image_auto_reference is not None
     ):
         auth.household.item_image_auto_reference = payload.item_image_auto_reference
+    if "offline_copy_policy" in payload.model_fields_set and payload.offline_copy_policy:
+        auth.household.offline_copy_policy = payload.offline_copy_policy
     db.commit()
-    return HouseholdOut(
-        id=auth.household.id,
-        name=auth.household.name,
-        default_currency=auth.household.default_currency,
-        warranty_reminder_days=auth.household.warranty_reminder_days,
-        item_image_auto_reference=auth.household.item_image_auto_reference,
-    )
+    return household_out(auth.household)

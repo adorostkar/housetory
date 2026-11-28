@@ -22,8 +22,13 @@ import {
   setActiveHouseholdId,
 } from "@/lib/api";
 import {
+  BACK_ONLINE_EVENT,
+  offlineSessionChanged,
+  useOfflineStatus,
+} from "@/lib/offline/controller";
+import {
   queryKeys,
-  useCanWrite,
+  useIsWriter,
   useSelectHousehold,
   useSession,
 } from "@/lib/queries";
@@ -167,6 +172,11 @@ const SettingsAppearancePage = React.lazy(() =>
     default: module.SettingsAppearancePage,
   })),
 );
+const SettingsOfflinePage = React.lazy(() =>
+  import("@/pages/settings-offline-page").then((module) => ({
+    default: module.SettingsOfflinePage,
+  })),
+);
 const SettingsServicesPage = React.lazy(() =>
   import("@/pages/settings-services-page").then((module) => ({
     default: module.SettingsServicesPage,
@@ -267,6 +277,7 @@ const SHELL_ROUTES = (
     <Route path="settings/account" element={<AccountSettingsPage />} />
     <Route path="settings/household" element={<SettingsHouseholdPage />} />
     <Route path="settings/appearance" element={<SettingsAppearancePage />} />
+    <Route path="settings/offline" element={<SettingsOfflinePage />} />
     <Route path="settings/services" element={<SettingsServicesPage />} />
     <Route path="settings/advanced" element={<SettingsAdvancedPage />} />
     <Route path="settings/members" element={<MembersSettingsPage />} />
@@ -303,6 +314,23 @@ export default function App() {
 
   // Keep the API client and query hashes aligned with the rendered session.
   setActiveHouseholdId(state?.household?.id ?? null);
+
+  // The offline copy follows the session the server reports: who is signed in,
+  // which household is open, and whether a copy is allowed.
+  const { online } = useOfflineStatus();
+  const sessionAnsweredAt = session.dataUpdatedAt;
+  React.useEffect(() => {
+    if (state && online) offlineSessionChanged(state);
+  }, [state, online, sessionAnsweredAt]);
+
+  React.useEffect(() => {
+    const onBackOnline = () => {
+      void queryClient.invalidateQueries();
+      toast.success("Back online", { description: "Your changes can be saved again." });
+    };
+    window.addEventListener(BACK_ONLINE_EVENT, onBackOnline);
+    return () => window.removeEventListener(BACK_ONLINE_EVENT, onBackOnline);
+  }, [queryClient]);
 
   React.useEffect(() => {
     const onHouseholdContext = () => {
@@ -518,7 +546,9 @@ function RequireAuth() {
 }
 
 function RequireWriter() {
-  const canWrite = useCanWrite();
-  if (!canWrite) return <Navigate to="/" replace />;
+  // The role, not the connection: a form that is open when the server goes away
+  // stays open, and can be saved when the server is back.
+  const writer = useIsWriter();
+  if (!writer) return <Navigate to="/" replace />;
   return <Outlet />;
 }

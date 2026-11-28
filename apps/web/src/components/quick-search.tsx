@@ -27,6 +27,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRememberedSearchScope } from "@/hooks/use-search-scope";
 import { withHousehold } from "@/lib/household-links";
+import { useOfflineStatus } from "@/lib/offline/controller";
 import {
   queryKeys,
   useAiStatus,
@@ -154,7 +155,9 @@ export function QuickSearch({
     : null;
   const hideExtras = compact && query.length > 0;
   // With the context chip on a phone there is no room for voice until the field has focus.
-  const hideVoice = hideExtras || (compact && context !== null && !inputFocused);
+  // Without the server there is no assistant and no voice: the field only searches the copy.
+  const { online } = useOfflineStatus();
+  const hideVoice = !online || hideExtras || (compact && context !== null && !inputFocused);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
@@ -222,7 +225,7 @@ export function QuickSearch({
     results: results.filter((result) => result.kind === group.kind),
   })).filter((group) => group.results.length > 0);
   const flatResults = groups.flatMap((group) => group.results);
-  const showAskRow = term.length >= 2 && !loading && !error;
+  const showAskRow = online && term.length >= 2 && !loading && !error;
   const askIndex = flatResults.length;
   const optionCount = flatResults.length + (showAskRow ? 1 : 0);
 
@@ -517,6 +520,7 @@ export function QuickSearch({
       const active = flatResults[activeIndex];
       if (active && !event.shiftKey) choose(active);
       else if (
+        online &&
         term.length >= 2 &&
         (event.shiftKey ||
           !(
@@ -770,7 +774,7 @@ export function QuickSearch({
           autoComplete="off"
           spellCheck={false}
           dir="auto"
-          placeholder={context ? "Ask…" : "Search or ask…"}
+          placeholder={!online ? "Search your copy…" : context ? "Ask…" : "Search or ask…"}
           aria-label="Search or ask about your inventory"
           aria-keyshortcuts="Meta+K Control+K"
           role="combobox"

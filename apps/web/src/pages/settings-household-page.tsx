@@ -17,7 +17,13 @@ import { useScrollToHash } from "@/hooks/use-scroll-to-hash";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import { CURRENCIES } from "@/lib/labels";
 import { queryKeys, useSession } from "@/lib/queries";
-import type { Household, SessionState } from "@/lib/types";
+import type { Household, OfflineCopyPolicy, SessionState } from "@/lib/types";
+
+const OFFLINE_POLICIES: Array<{ value: OfflineCopyPolicy; label: string }> = [
+  { value: "members", label: "Owners and members" },
+  { value: "everyone", label: "Everyone, also viewers" },
+  { value: "nobody", label: "Nobody" },
+];
 
 /** Household name and defaults, item images, homes and the household switcher. */
 export function SettingsHouseholdPage() {
@@ -34,8 +40,13 @@ export function SettingsHouseholdPage() {
     session.data?.household?.item_image_auto_reference ?? false,
   );
 
+  const [offlinePolicy, setOfflinePolicy] = React.useState<OfflineCopyPolicy>(
+    session.data?.household?.offline_copy_policy ?? "members",
+  );
+
   React.useEffect(() => {
     if (session.data?.household) {
+      setOfflinePolicy(session.data.household.offline_copy_policy ?? "members");
       setHouseholdName(session.data.household.name);
       setDefaultCurrency(session.data.household.default_currency ?? "USD");
       setReminderDays(String(session.data.household.warranty_reminder_days));
@@ -55,6 +66,7 @@ export function SettingsHouseholdPage() {
         default_currency: defaultCurrency,
         warranty_reminder_days: Number(reminderDays),
         item_image_auto_reference: autoReference,
+        offline_copy_policy: offlinePolicy,
       }),
     onSuccess: (household) => {
       queryClient.setQueryData<SessionState>(queryKeys.session, (current) =>
@@ -187,7 +199,8 @@ export function SettingsHouseholdPage() {
                 (householdName.trim() === household?.name &&
                   defaultCurrency === (household?.default_currency ?? "USD") &&
                   Number(reminderDays) === household?.warranty_reminder_days &&
-                  autoReference === (household?.item_image_auto_reference ?? false))
+                  autoReference === (household?.item_image_auto_reference ?? false) &&
+                  offlinePolicy === (household?.offline_copy_policy ?? "members"))
               }
             >
               {saveHousehold.isPending && <Spinner />}
@@ -217,6 +230,32 @@ export function SettingsHouseholdPage() {
                 </span>
               </span>
             </label>
+          </div>
+          <div
+            id="offline-copies"
+            className="mt-3 scroll-mt-24 rounded-xl border border-border/60 bg-background/35 p-3.5"
+          >
+            <label htmlFor="offline-copy-policy" className="text-xs font-medium">
+              Offline copies
+            </label>
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
+              Who may keep a read-only copy of this household on a phone, tablet or computer.
+              Each person turns it on for their own device. A copy that is no longer allowed is
+              removed when that device next reaches the server. Save to apply.
+            </p>
+            <Select
+              id="offline-copy-policy"
+              className="mt-3 max-w-xs"
+              value={offlinePolicy}
+              disabled={!isOwner || saveHousehold.isPending}
+              onChange={(event) => setOfflinePolicy(event.target.value as OfflineCopyPolicy)}
+            >
+              {OFFLINE_POLICIES.map((policy) => (
+                <option key={policy.value} value={policy.value}>
+                  {policy.label}
+                </option>
+              ))}
+            </Select>
           </div>
           {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
           <div className="max-w-sm">

@@ -4,6 +4,10 @@ This record describes what was actually exercised without outbound Internet. It 
 not a claim that the browser can edit inventory offline: the browser still needs
 to reach the self-hosted server over a trusted LAN/local network.
 
+A different thing is the opt-in **offline copy** on a device, for reading when
+the server itself cannot be reached. That is described in
+[`OFFLINE_COPY.md`](OFFLINE_COPY.md).
+
 ## Isolated topology
 
 `compose.offline.yaml` creates disposable volumes and an internal Docker network:

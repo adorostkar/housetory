@@ -7,6 +7,7 @@ import { AccountMenu } from "@/components/account-menu";
 import { AddItemsProvider, useAddItems } from "@/components/add-items";
 import { BrandMark } from "@/components/brand-mark";
 import { HouseholdSwitcher } from "@/components/household-switcher";
+import { OfflineBanner, OfflineBoundary } from "@/components/offline-banner";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
 import { BarEditorBoundary } from "@/components/shell/bar-editor";
@@ -18,7 +19,8 @@ import { useKeepFocusedFieldVisible } from "@/hooks/use-keep-focused-field-visib
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { isTextEntry, useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useCanWrite, usePendingActions, useReviewSummary } from "@/lib/queries";
+import { useOfflineStatus } from "@/lib/offline/controller";
+import { useCanWrite, useIsWriter, usePendingActions, useReviewSummary } from "@/lib/queries";
 import { useReplayLocalReviewDrafts } from "@/lib/review-drafts";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
@@ -85,6 +87,8 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const location = useLocation();
   const navigate = useNavigate();
   const canWrite = useCanWrite();
+  const writer = useIsWriter();
+  const { online } = useOfflineStatus();
   const reviewSummary = useReviewSummary();
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -307,7 +311,17 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
     return () => window.removeEventListener(ASSISTANT_TASK_COMPLETED_EVENT, onTaskCompleted);
   }, [openTaskReview]);
 
+  const assistantNeedsConnection = () => {
+    if (online) return false;
+    toast.info("The assistant needs a connection", {
+      id: "assistant-offline",
+      description: "You can still search your offline copy here.",
+    });
+    return true;
+  };
+
   const openAssistant = (text: string, trigger: HTMLElement, file?: File) => {
+    if (assistantNeedsConnection()) return;
     restoreAssistantFocus.current = true;
     assistantTrigger.current = trigger;
     setAssistantRequest({ id: crypto.randomUUID(), text, ...(file ? { file } : {}) });
@@ -321,6 +335,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   };
 
   const openAssistantPanel = (trigger: HTMLElement) => {
+    if (assistantNeedsConnection()) return;
     restoreAssistantFocus.current = true;
     assistantTrigger.current = trigger;
     if (location.hash !== "#assistant") {
@@ -386,7 +401,8 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             "pb-[calc(var(--shell-bar-height,0px)+1.5rem)] pt-[max(1rem,env(safe-area-inset-top))] lg:pb-10 lg:pt-8",
           )}
         >
-          {!canWrite && (
+          <OfflineBanner />
+          {!writer && (
             <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
               <span className="font-medium text-brass">Viewer access.</span> You
               can browse and search this household. Inventory changes, scans,
@@ -399,7 +415,9 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             className="animate-fade-in"
           >
             <Suspense fallback={<PageFallback />}>
-              <Routes location={mainLocation}>{routes}</Routes>
+              <OfflineBoundary pathname={mainLocation.pathname}>
+                <Routes location={mainLocation}>{routes}</Routes>
+              </OfflineBoundary>
             </Suspense>
           </div>
         </main>
@@ -443,7 +461,9 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
         >
           <div key={location.pathname} className="animate-fade-in">
             <Suspense fallback={<PageFallback />}>
-              <Routes>{panelRoutes}</Routes>
+              <OfflineBoundary pathname={location.pathname}>
+                <Routes>{panelRoutes}</Routes>
+              </OfflineBoundary>
             </Suspense>
           </div>
         </aside>

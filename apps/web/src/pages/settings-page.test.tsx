@@ -256,6 +256,7 @@ describe("Settings › Household defaults", () => {
         default_currency: "EUR",
         warranty_reminder_days: 30,
         item_image_auto_reference: false,
+        offline_copy_policy: "members",
       }),
     );
     await waitFor(() => {

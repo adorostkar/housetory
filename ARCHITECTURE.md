@@ -144,6 +144,7 @@ All application endpoints are versioned under `/api/v1`.
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items and reviewed per-item allocations |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
+| Offline copy | `GET /offline/snapshot` (one household, with `ETag`), `GET /offline/photos/{id}` (small photo); both only if the household allows a copy for the role |
 | Insurance | `POST /insurance-valuations/scope-preview`, `POST/GET /insurance-valuations/batches/{request_id}`, cancel, `POST/GET /insurance-lists/{job_id}`, PDF/CSV downloads |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 | Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/query` is the explicit search and answer flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
@@ -631,6 +632,11 @@ deployment.
 - The UI is an installable PWA: web manifest, Apple meta tags, generated icons,
   standalone display and an app-shell service worker that never caches API
   data.
+- An opt-in, read-only offline copy of one household can be kept on a device
+  (`apps/web/src/lib/offline/`, `GET /api/v1/offline/snapshot`). The page saves
+  it in IndexedDB after the person turned it on; the API client answers reads
+  from it while the server cannot be reached and refuses every change. See
+  `docs/OFFLINE_COPY.md`.
 - Item photography supports multiple uploads, cover selection, an accessible
   full-screen viewer with keyboard/thumbnail navigation, and an iPhone camera
   capture action.
@@ -1028,7 +1034,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   provider search/assistant quality was not validated.
 - Photos cannot be drag-reordered and have no captions; a cover can be chosen.
 - Mixed currencies are reported per currency, not converted.
-- Offline mode caches only the app shell; inventory data requires the server.
+- Without the opt-in offline copy, only the app shell is cached and inventory
+  data requires the server. With it, the copy is read-only, holds one household,
+  has no documents, and is not encrypted beyond what the device does.
 - Uploads are stored on a single local volume, not replicated object storage, by
   design for a single-server self-hosted deployment.
 - Base images use mutable tags; rebuild and rescan regularly for newly disclosed

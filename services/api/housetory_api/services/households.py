@@ -7,9 +7,33 @@ from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
 from ..models import Household, HouseholdMember, Property, User
+from ..schemas.auth import HouseholdOut
 from ..schemas.households import HouseholdCreate
 
 MAX_HOUSEHOLDS_PER_ACCOUNT = 20
+WRITER_ROLES = {"owner", "member"}
+
+
+def household_out(household: Household) -> HouseholdOut:
+    return HouseholdOut(
+        id=household.id,
+        name=household.name,
+        default_currency=household.default_currency,
+        warranty_reminder_days=household.warranty_reminder_days,
+        item_image_auto_reference=household.item_image_auto_reference,
+        offline_copy_policy=household.offline_copy_policy,
+    )
+
+
+def offline_copy_allowed(household: Household, role: str | None) -> bool:
+    """Whether this role may keep a read-only copy of the household on a device."""
+    if role is None:
+        return False
+    if household.offline_copy_policy == "everyone":
+        return True
+    if household.offline_copy_policy == "members":
+        return role in WRITER_ROLES
+    return False
 
 
 def _user_lock(db: Session, user_id: uuid.UUID) -> None:

@@ -28,6 +28,7 @@ from .routes import (
     loans,
     locations,
     manuals,
+    offline,
     online_search,
     overview,
     ownership,
@@ -58,6 +59,7 @@ api_router.include_router(place_management.router, dependencies=write_guard)
 api_router.include_router(inventory_review.router, dependencies=write_guard)
 api_router.include_router(household.router, dependencies=write_guard)
 api_router.include_router(overview.router)
+api_router.include_router(offline.router)
 api_router.include_router(ownership.router)
 api_router.include_router(properties.router, dependencies=write_guard)
 api_router.include_router(rooms.router, dependencies=write_guard)

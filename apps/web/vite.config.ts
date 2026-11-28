@@ -53,8 +53,28 @@ function pdfjsData(): Plugin {
   };
 }
 
+// The files of the app itself, for a device that keeps an offline copy: it
+// saves them so every page opens without the server (src/lib/offline/device-cache.ts).
+// The PDF viewer is left out; documents are not part of the copy.
+function offlineAssetList(): Plugin {
+  return {
+    name: "housetory:offline-assets",
+    generateBundle(_options, bundle) {
+      const files = Object.keys(bundle)
+        .filter((file) => file.startsWith("assets/") && !/pdf[.-]/.test(file))
+        .map((file) => `/${file}`)
+        .sort();
+      this.emitFile({
+        type: "asset",
+        fileName: "offline-assets.json",
+        source: JSON.stringify({ files }),
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), pdfjsData()],
+  plugins: [react(), pdfjsData(), offlineAssetList()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
