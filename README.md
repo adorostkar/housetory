@@ -155,7 +155,9 @@ Tailscale is optional.
   advisory. Optional owner-triggered AI review reuses the existing consented
   Assistant task with a bounded one-request data disclosure. Combined
   **Organisation** suggestions cover existing/new categories and up to three
-  practical tags per item, with atomic apply and exact category/tag undo. Latest
+  practical tags per item, with atomic apply and exact category/tag undo. AI
+  proposals group related items under a shared category across batches, are shown
+  together and can be applied as a group after approval. Latest
   review shows provider, model, items sent and completed/skipped/failed AI. An optional
   owner-managed weekly/monthly schedule is off by default, runs through durable
   worker jobs with hard item/daily caps, and never auto-applies changes. Scheduled

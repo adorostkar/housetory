@@ -83,6 +83,9 @@ import {
   TYPE_LABELS,
   TYPE_VALUES,
   aiRunSummary,
+  existingCategoryKey,
+  groupBySharedCategory,
+  newCategoryKey,
   organisationTagNames,
   reviewScopeLabel,
   stringField,
@@ -823,6 +826,210 @@ export function InventoryReview({
   const workspaceParams = new URLSearchParams(localParams);
   if (selectedRunId) workspaceParams.set("run_id", selectedRunId);
 
+  const renderSuggestion = (suggestion: ReviewSuggestion) => {
+    const actionable =
+      suggestion.status === "pending" &&
+      suggestion.action_kind !== "advisory";
+    const categoryName =
+      stringField(suggestion.after, "category_name") ??
+      stringField(suggestion.after, "name");
+    const beforeName = stringField(suggestion.before, "name");
+    const proposedTags =
+      suggestion.type === "organisation"
+        ? organisationTagNames(suggestion.after)
+        : [];
+    const evidence = suggestion.evidence ?? {};
+    const missingFields = stringList(evidence.missing_fields);
+    const mentionedRoom = stringField(evidence, "mentioned_room");
+    const assignedRoom = stringField(evidence, "assigned_room");
+    const beforeCategory = stringField(suggestion.before, "category_name");
+    // An existing record shows what it has now and what it would get.
+    const editable = suggestion.status === "pending" && (
+      suggestion.action_kind === "apply_category" || suggestion.action_kind === "apply_name"
+    );
+    const editDraft = editable || suggestion.status === "dismissed"
+      ? editDraftFor(suggestion) : null;
+    const editedValue = editDraft?.name
+      ?? categories.find((category) => category.id === editDraft?.categoryId)?.name;
+    const values: ReviewValue[] = [
+      ...(suggestion.type === "name" && categoryName
+        ? [{ label: "Name", before: beforeName ?? undefined, value: categoryName }]
+        : []),
+      ...(suggestion.type !== "name" && categoryName
+        ? [{
+            label: "Category",
+            before: suggestion.action_kind === "advisory" ? undefined : beforeCategory ?? "none",
+            value: `${categoryName}${suggestion.after.category_is_new === true ? " (new)" : ""}`,
+          }]
+        : []),
+      // What the person entered instead of the proposal. The row applies this.
+      ...(editedValue ? [{ label: "Your edit", value: editedValue }] : []),
+      ...(proposedTags.length > 0 ? [{ label: "Tags", value: proposedTags.join(", ") }] : []),
+      ...(missingFields.length > 0
+        ? [{ label: "Missing", value: missingFields.join(", ") }]
+        : []),
+      ...(mentionedRoom && assignedRoom
+        ? [{ label: "Room", before: assignedRoom, value: `${mentionedRoom} is mentioned`, uncertain: true }]
+        : []),
+      ...(suggestion.type === "possible_duplicate"
+        ? [{
+            label: "Match",
+            value: evidence.serial_match === true ? "Matching serial" : "Same name/brand/model",
+            uncertain: evidence.serial_match !== true,
+          }]
+        : []),
+    ];
+    const applies = suggestion.status === "pending" && (
+      suggestion.action_kind === "apply_category" ||
+      suggestion.action_kind === "apply_name" ||
+      suggestion.action_kind === "apply_organisation"
+    );
+    return (
+      <li key={suggestion.id}>
+        <ReviewRow
+          title={suggestion.title}
+          className={suggestion.status === "stale" ? "border-destructive/25" : undefined}
+          values={values}
+          selection={!embedded && actionable && canWrite
+            ? {
+                checked: selectedSuggestionIds.has(suggestion.id),
+                onChange: () => toggleSuggestion(suggestion.id),
+                label: `Select ${suggestion.title}`,
+              }
+            : undefined}
+          badges={embedded ? (
+            <span className="text-2xs text-muted-foreground">
+              {suggestion.run_id === displayedRun?.id ? "New this review" : "Already pending"}
+            </span>
+          ) : <SuggestionStatusBadge suggestion={suggestion} />}
+          extra={
+            <>
+              <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                {suggestion.explanation}
+              </p>
+              {(suggestion.item || suggestion.secondary_item) && (
+                <p className="flex flex-wrap items-center gap-2 text-xs">
+                  {suggestion.item && (
+                    <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
+                      <ItemReference item={suggestion.item} origin={origin} />
+                    </span>
+                  )}
+                  {suggestion.secondary_item && (
+                    <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
+                      Compare with{" "}
+                      <ItemReference item={suggestion.secondary_item} origin={origin} />
+                    </span>
+                  )}
+                </p>
+              )}
+              {suggestion.status === "accepted" &&
+                !suggestion.can_undo &&
+                suggestion.undo_blocked_reason && (
+                  <p className="text-xs text-muted-foreground">
+                    {suggestion.undo_blocked_reason}
+                  </p>
+                )}
+            </>
+          }
+          primary={applies ? {
+            label: suggestion.action_kind === "apply_organisation" ? "Apply changes" : "Apply change",
+            // With an edit of your own, the row applies that edit.
+            onClick: () => applyMutation.mutate({ suggestion, ...(editable ? editDraft ?? {} : {}) }),
+            disabled: !canWrite || applyMutation.isPending,
+          } : undefined}
+          onSkip={canWrite && (suggestion.status === "pending" || suggestion.status === "stale")
+            ? () => dismissMutation.mutate(suggestion)
+            : undefined}
+          skipLabel={suggestion.status === "stale" ? "Skip stale" : "Skip"}
+          actions={
+            <>
+              {editable && (
+                <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                  disabled={!canWrite} onClick={() => openEdit(suggestion)}>
+                  Edit first
+                </Button>
+              )}
+              {suggestion.status === "pending" &&
+                suggestion.action_kind === "advisory" &&
+                suggestion.type === "possible_duplicate" && (
+                  <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                    onClick={() => setCompareTarget(suggestion)}>
+                    <Eye />
+                    Compare
+                  </Button>
+                )}
+              {suggestion.item && (
+                <Button size="sm" variant="ghost" className="min-h-11 lg:min-h-9" asChild>
+                  <Link
+                    to={appendOrigin(`/items/${suggestion.item.id}`, origin)}
+                    onClick={() => rememberListScroll(origin ?? null)}
+                  >
+                    Open item
+                    <ArrowRight />
+                  </Link>
+                </Button>
+              )}
+              {suggestion.status === "accepted" && suggestion.can_undo && (
+                <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                  disabled={!canWrite || undoMutation.isPending}
+                  onClick={() => undoMutation.mutate(suggestion)}>
+                  <Undo2 />
+                  Undo
+                </Button>
+              )}
+              {suggestion.status === "dismissed" && canWrite && (
+                <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                  aria-label={`Restore ${suggestion.title}`}
+                  disabled={undoMutation.isPending}
+                  onClick={() => undoMutation.mutate(suggestion)}>
+                  <Undo2 />
+                  Restore
+                </Button>
+              )}
+              {!embedded && (
+                <span className="ml-auto text-2xs text-muted-foreground">
+                  {timestamp(suggestion.created_at)}
+                </span>
+              )}
+            </>
+          }
+        />
+        {conflictNotice(suggestion)}
+      </li>
+    );
+  };
+
+  // A category under another one is named with its parents, so that two categories
+  // with the same name can be told apart.
+  const categoryPathLabel = (id: string) => {
+    const names: string[] = [];
+    let entry = categories.find((category) => category.id === id);
+    while (entry && names.length < 8) {
+      names.unshift(entry.name);
+      const parentId = entry.parent_id;
+      entry = parentId ? categories.find((category) => category.id === parentId) : undefined;
+    }
+    return names.length ? names.join(" / ") : null;
+  };
+  // Waiting proposals that lead to the same category are shown together. An existing
+  // category is known by its id, a category that does not exist yet by its name. A row
+  // with an edit of your own goes with the category it would really get.
+  const suggestionEntries = groupBySharedCategory(suggestions, (suggestion) => {
+    if (suggestion.status !== "pending") return null;
+    const proposedName = stringField(suggestion.after, "category_name");
+    const proposedId = suggestion.category_id ?? stringField(suggestion.after, "category_id");
+    if (suggestion.action_kind === "apply_category") {
+      const edited = editDraftFor(suggestion)?.categoryId;
+      const id = edited ?? proposedId;
+      const label = id ? categoryPathLabel(id) ?? (edited ? null : proposedName) : null;
+      return id && label ? { key: existingCategoryKey(id), label } : null;
+    }
+    if (suggestion.action_kind !== "apply_organisation" || !proposedName) return null;
+    return proposedId
+      ? { key: existingCategoryKey(proposedId), label: categoryPathLabel(proposedId) ?? proposedName }
+      : { key: newCategoryKey(proposedName), label: proposedName };
+  });
+
   return (
     <div className={embedded ? "min-w-0 space-y-3 [&_button]:min-h-11" : "animate-fade-up"}>
       {embedded && <section aria-label="Inventory review" className="space-y-3">
@@ -1343,178 +1550,37 @@ export function InventoryReview({
             )}
 
             <ul className="mt-4 space-y-3">
-              {suggestions.map((suggestion) => {
-                const actionable =
-                  suggestion.status === "pending" &&
-                  suggestion.action_kind !== "advisory";
-                const categoryName =
-                  stringField(suggestion.after, "category_name") ??
-                  stringField(suggestion.after, "name");
-                const beforeName = stringField(suggestion.before, "name");
-                const proposedTags =
-                  suggestion.type === "organisation"
-                    ? organisationTagNames(suggestion.after)
-                    : [];
-                const evidence = suggestion.evidence ?? {};
-                const missingFields = stringList(evidence.missing_fields);
-                const mentionedRoom = stringField(evidence, "mentioned_room");
-                const assignedRoom = stringField(evidence, "assigned_room");
-                const beforeCategory = stringField(suggestion.before, "category_name");
-                // An existing record shows what it has now and what it would get.
-                const editable = suggestion.status === "pending" && (
-                  suggestion.action_kind === "apply_category" || suggestion.action_kind === "apply_name"
-                );
-                const editDraft = editable || suggestion.status === "dismissed"
-                  ? editDraftFor(suggestion) : null;
-                const editedValue = editDraft?.name
-                  ?? categories.find((category) => category.id === editDraft?.categoryId)?.name;
-                const values: ReviewValue[] = [
-                  ...(suggestion.type === "name" && categoryName
-                    ? [{ label: "Name", before: beforeName ?? undefined, value: categoryName }]
-                    : []),
-                  ...(suggestion.type !== "name" && categoryName
-                    ? [{
-                        label: "Category",
-                        before: suggestion.action_kind === "advisory" ? undefined : beforeCategory ?? "none",
-                        value: `${categoryName}${suggestion.after.category_is_new === true ? " (new)" : ""}`,
-                      }]
-                    : []),
-                  // What the person entered instead of the proposal. The row applies this.
-                  ...(editedValue ? [{ label: "Your edit", value: editedValue }] : []),
-                  ...(proposedTags.length > 0 ? [{ label: "Tags", value: proposedTags.join(", ") }] : []),
-                  ...(missingFields.length > 0
-                    ? [{ label: "Missing", value: missingFields.join(", ") }]
-                    : []),
-                  ...(mentionedRoom && assignedRoom
-                    ? [{ label: "Room", before: assignedRoom, value: `${mentionedRoom} is mentioned`, uncertain: true }]
-                    : []),
-                  ...(suggestion.type === "possible_duplicate"
-                    ? [{
-                        label: "Match",
-                        value: evidence.serial_match === true ? "Matching serial" : "Same name/brand/model",
-                        uncertain: evidence.serial_match !== true,
-                      }]
-                    : []),
-                ];
-                const applies = suggestion.status === "pending" && (
-                  suggestion.action_kind === "apply_category" ||
-                  suggestion.action_kind === "apply_name" ||
-                  suggestion.action_kind === "apply_organisation"
-                );
-                return (
-                  <li key={suggestion.id}>
-                    <ReviewRow
-                      title={suggestion.title}
-                      className={suggestion.status === "stale" ? "border-destructive/25" : undefined}
-                      values={values}
-                      selection={!embedded && actionable && canWrite
-                        ? {
-                            checked: selectedSuggestionIds.has(suggestion.id),
-                            onChange: () => toggleSuggestion(suggestion.id),
-                            label: `Select ${suggestion.title}`,
-                          }
-                        : undefined}
-                      badges={embedded ? (
-                        <span className="text-2xs text-muted-foreground">
-                          {suggestion.run_id === displayedRun?.id ? "New this review" : "Already pending"}
-                        </span>
-                      ) : <SuggestionStatusBadge suggestion={suggestion} />}
-                      extra={
-                        <>
-                          <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
-                            {suggestion.explanation}
+              {suggestionEntries.map((entry) => entry.kind === "single"
+                ? renderSuggestion(entry.suggestion)
+                : (
+                  <li key={`group-${entry.key}`}>
+                    <section aria-label={`${entry.category} group`}
+                      className="rounded-2xl border border-border/60 bg-background/35 p-2.5 sm:p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-2.5">
+                        <div className="min-w-0">
+                          <h3 className="break-words text-sm font-medium">
+                            {entry.category}
+                            {entry.suggestions.some((suggestion) => suggestion.after.category_is_new === true)
+                              ? " (new)" : ""}
+                          </h3>
+                          <p className="text-2xs text-muted-foreground">
+                            {entry.suggestions.length} related items would share this category.
+                            Review each one, or apply the group. Nothing changes until you apply.
                           </p>
-                          {(suggestion.item || suggestion.secondary_item) && (
-                            <p className="flex flex-wrap items-center gap-2 text-xs">
-                              {suggestion.item && (
-                                <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
-                                  <ItemReference item={suggestion.item} origin={origin} />
-                                </span>
-                              )}
-                              {suggestion.secondary_item && (
-                                <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
-                                  Compare with{" "}
-                                  <ItemReference item={suggestion.secondary_item} origin={origin} />
-                                </span>
-                              )}
-                            </p>
-                          )}
-                          {suggestion.status === "accepted" &&
-                            !suggestion.can_undo &&
-                            suggestion.undo_blocked_reason && (
-                              <p className="text-xs text-muted-foreground">
-                                {suggestion.undo_blocked_reason}
-                              </p>
-                            )}
-                        </>
-                      }
-                      primary={applies ? {
-                        label: suggestion.action_kind === "apply_organisation" ? "Apply changes" : "Apply change",
-                        // With an edit of your own, the row applies that edit.
-                        onClick: () => applyMutation.mutate({ suggestion, ...(editable ? editDraft ?? {} : {}) }),
-                        disabled: !canWrite || applyMutation.isPending,
-                      } : undefined}
-                      onSkip={canWrite && (suggestion.status === "pending" || suggestion.status === "stale")
-                        ? () => dismissMutation.mutate(suggestion)
-                        : undefined}
-                      skipLabel={suggestion.status === "stale" ? "Skip stale" : "Skip"}
-                      actions={
-                        <>
-                          {editable && (
-                            <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
-                              disabled={!canWrite} onClick={() => openEdit(suggestion)}>
-                              Edit first
-                            </Button>
-                          )}
-                          {suggestion.status === "pending" &&
-                            suggestion.action_kind === "advisory" &&
-                            suggestion.type === "possible_duplicate" && (
-                              <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
-                                onClick={() => setCompareTarget(suggestion)}>
-                                <Eye />
-                                Compare
-                              </Button>
-                            )}
-                          {suggestion.item && (
-                            <Button size="sm" variant="ghost" className="min-h-11 lg:min-h-9" asChild>
-                              <Link
-                                to={appendOrigin(`/items/${suggestion.item.id}`, origin)}
-                                onClick={() => rememberListScroll(origin ?? null)}
-                              >
-                                Open item
-                                <ArrowRight />
-                              </Link>
-                            </Button>
-                          )}
-                          {suggestion.status === "accepted" && suggestion.can_undo && (
-                            <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
-                              disabled={!canWrite || undoMutation.isPending}
-                              onClick={() => undoMutation.mutate(suggestion)}>
-                              <Undo2 />
-                              Undo
-                            </Button>
-                          )}
-                          {suggestion.status === "dismissed" && canWrite && (
-                            <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
-                              aria-label={`Restore ${suggestion.title}`}
-                              disabled={undoMutation.isPending}
-                              onClick={() => undoMutation.mutate(suggestion)}>
-                              <Undo2 />
-                              Restore
-                            </Button>
-                          )}
-                          {!embedded && (
-                            <span className="ml-auto text-2xs text-muted-foreground">
-                              {timestamp(suggestion.created_at)}
-                            </span>
-                          )}
-                        </>
-                      }
-                    />
-                    {conflictNotice(suggestion)}
+                        </div>
+                        {canWrite && (
+                          <Button type="button" size="sm" className="min-h-11 lg:min-h-9"
+                            disabled={bulkAcceptMutation.isPending}
+                            onClick={() => bulkAcceptMutation.mutate(entry.suggestions.map((suggestion) => suggestion.id))}>
+                            {bulkAcceptMutation.isPending ? <Spinner /> : <Check />}
+                            Apply group ({entry.suggestions.length})
+                          </Button>
+                        )}
+                      </div>
+                      <ul className="space-y-2">{entry.suggestions.map(renderSuggestion)}</ul>
+                    </section>
                   </li>
-                );
-              })}
+                ))}
             </ul>
             {!embedded && statusFilter === "pending" && (summaryQuery.data?.status_counts.dismissed ?? 0) > 0 && (
               // Skipped suggestions wait here after the Undo message is gone.

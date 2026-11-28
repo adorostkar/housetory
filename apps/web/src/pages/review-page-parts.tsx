@@ -72,6 +72,10 @@ export function ReviewAiConsent({
           Each request includes up to 40 eligible items: names, descriptions (up to
           300 characters), brand/model, current category/tag names, and the names
           and internal IDs of up to 200 household categories and 200 tags.
+          To put related items together, each request also includes, from the
+          reviewed scope only: its categories in use and the categories already
+          proposed there, each with up to 3 example item names, and up to 80
+          names of other items without a category.
           Review again also includes already organised items.
           Descriptions may contain personal information you entered. No photo
           files, receipts, purchase amounts, location fields, loans, private-note

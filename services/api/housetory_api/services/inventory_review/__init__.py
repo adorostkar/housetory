@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, func, or_, select, text
+from sqlalchemy import String, and_, case, cast, func, literal, or_, select, text
 from sqlalchemy.orm import Session
 
 from ...api.errors import ApiError
@@ -126,6 +126,7 @@ def run_review(
     local_checks: bool = True,
     comparison_scope: _Scope | None = None,
     ai_inference=None,
+    context_conditions: list[Any] | None = None,
 ) -> ReviewRunOut:
     db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
@@ -224,6 +225,10 @@ def run_review(
                 already_targeted,
                 review_again=payload.review_again,
                 ai_inference=ai_inference,
+                context_conditions=context_conditions,
+                # Scheduled consent covers the reviewed items and the household
+                # taxonomy. A scheduled request stays as it was: no scope context.
+                include_scope_context=trigger_type != "scheduled",
             )
             ai_used = bool(ai_meta.get("attempted"))
             candidates.extend(ai_candidates)
@@ -494,12 +499,47 @@ def list_suggestions(
             )
         )
     total = int(db.scalar(select(func.count(InventoryReviewSuggestion.id)).where(*conditions)) or 0)
+    # Waiting proposals for the same category are listed together, at the place of the
+    # best one. Every other row is a group of its own and keeps its place. An existing
+    # category is known by its id, because two categories can have the same name; a kept
+    # "Edit first" choice counts instead of the proposal. A category that does not exist
+    # yet is known by its name.
+    after = InventoryReviewSuggestion.after_json
+    kept_edit = InventoryReviewSuggestion.evidence_json["review_draft"]["category_id"].as_string()
+    existing_category = case(
+        (
+            InventoryReviewSuggestion.type == "category",
+            func.coalesce(func.nullif(kept_edit, ""), after["category_id"].as_string()),
+        ),
+        else_=after["category_id"].as_string(),
+    )
+    new_category = func.lower(
+        func.regexp_replace(func.trim(after["category_name"].as_string()), r"\s+", " ", "g")
+    )
+    shared_category = func.coalesce(
+        literal("id:").concat(func.nullif(existing_category, "")),
+        literal("new:").concat(func.nullif(new_category, "")),
+    )
+    group = case(
+        (
+            and_(
+                InventoryReviewSuggestion.status == "pending",
+                InventoryReviewSuggestion.type.in_(("category", "organisation")),
+                shared_category.is_not(None),
+            ),
+            shared_category,
+        ),
+        else_=cast(InventoryReviewSuggestion.id, String),
+    )
     rows = list(
         db.scalars(
             select(InventoryReviewSuggestion)
             .where(*conditions)
             .order_by(
                 case((InventoryReviewSuggestion.status == "pending", 0), else_=1),
+                func.max(InventoryReviewSuggestion.priority).over(partition_by=group).desc(),
+                func.max(InventoryReviewSuggestion.created_at).over(partition_by=group).desc(),
+                group,
                 InventoryReviewSuggestion.priority.desc(),
                 InventoryReviewSuggestion.created_at.desc(),
                 InventoryReviewSuggestion.id,

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@/lib/api";
 import { writerId } from "@/lib/review-draft-store";
 import type {
+  Category,
   ItemSummary,
   ReviewRun,
   ReviewSuggestion,
@@ -167,6 +168,7 @@ let signedIn = false;
 const thisWriter = () => writerId(signedIn ? "user-1" : null);
 let owner = true;
 let suggestions = [categorySuggestion, duplicateSuggestion];
+let categoryList: Category[] = [];
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -200,7 +202,7 @@ vi.mock("@/lib/queries", async (importOriginal) => {
     useProperties: () => ({ data: { items: [] }, isPending: false }),
     useRooms: () => ({ data: { items: [] }, isPending: false }),
     useLocations: () => ({ data: { items: [] }, isPending: false }),
-    useCategories: () => ({ data: { items: [] }, isPending: false }),
+    useCategories: () => ({ data: { items: categoryList }, isPending: false }),
     useReviewSummary: () => ({ data: summary, isPending: false }),
     useReviewSchedule: () => ({
       data: null,
@@ -313,6 +315,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
             },
           };
         }
+        if (path.endsWith("/bulk-accept")) {
+          return { applied_count: 2, skipped_count: 0, stale_count: 0, unsupported_count: 0, results: [] };
+        }
         if (path === "/inventory-review/runs") {
           return {
             id: "run-new",
@@ -375,6 +380,7 @@ beforeEach(() => {
   signedIn = false;
   localStorage.clear();
   suggestions = [categorySuggestion, duplicateSuggestion];
+  categoryList = [];
   summary.last_run = null;
   summary.unfinished_runs = [];
   vi.mocked(api.post).mockClear();
@@ -1193,6 +1199,95 @@ describe("ReviewPage", () => {
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/inventory-review/suggestions/suggestion-organisation/accept",
         {},
+      ),
+    );
+  });
+
+  it("shows proposals for one category together, with single review and a group apply", async () => {
+    const proposal = (id: string, name: string, category: string): ReviewSuggestion => ({
+      ...organisationSuggestion,
+      id,
+      title: `Categorise ${name}`,
+      item_id: `item-${id}`,
+      item: item({ id: `item-${id}`, name }),
+      after: { category_id: null, category_name: category, category_is_new: true, tags: [] },
+      fingerprint: `fingerprint-${id}`,
+    });
+    // The duplicate finding sits between the two related proposals in the list.
+    suggestions = [
+      proposal("tent", "Family tent", "Camping & Hiking"),
+      duplicateSuggestion,
+      proposal("pillows", "Camp pillows", "camping &  hiking"),
+      categorySuggestion,
+    ];
+    renderPage();
+    const group = screen.getByRole("region", { name: "Camping & Hiking group" });
+    expect(within(group).getByRole("heading", { name: "Camping & Hiking (new)" })).toBeVisible();
+    expect(within(group).getAllByRole("article").map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Categorise Family tent",
+      "Categorise Camp pillows",
+    ]);
+    // Each proposal can still be decided by itself.
+    expect(within(group).getAllByRole("button", { name: "Apply changes" })).toHaveLength(2);
+    expect(within(group).getAllByRole("button", { name: "Skip" })).toHaveLength(2);
+    // A category that one suggestion proposes is not a group.
+    expect(screen.queryByRole("region", { name: "Tools group" })).toBeNull();
+    // Showing the group applies nothing.
+    expect(api.post).not.toHaveBeenCalled();
+
+    await userEvent.click(within(group).getByRole("button", { name: "Apply group (2)" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/bulk-accept",
+        { suggestion_ids: ["tent", "pillows"] },
+      ),
+    );
+  });
+
+  it("groups an existing category by its record, not by its name, and follows a kept edit", async () => {
+    const category = (id: string, name: string, parent_id: string | null): Category => ({
+      id, name, parent_id, color: null, description: null, sort_order: 0, item_count: 0,
+      created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+    });
+    categoryList = [
+      category("camping", "Camping", null),
+      category("camping-accessories", "Accessories", "camping"),
+      category("workshop", "Workshop", null),
+      category("workshop-accessories", "Accessories", "workshop"),
+    ];
+    const proposal = (id: string, categoryId: string): ReviewSuggestion => ({
+      ...organisationSuggestion,
+      id,
+      title: `Categorise ${id}`,
+      category_id: categoryId,
+      after: { category_id: categoryId, category_name: "Accessories", category_is_new: false, tags: [] },
+      fingerprint: `fingerprint-${id}`,
+    });
+    suggestions = [
+      proposal("headlamp", "camping-accessories"),
+      proposal("vise", "workshop-accessories"),
+      // Proposed for Tools, but the person chose the camping category under "Edit first".
+      { ...categorySuggestion, evidence: { review_draft: { category_id: "camping-accessories" } } },
+    ];
+    renderPage();
+    const group = screen.getByRole("region", { name: "Camping / Accessories group" });
+    expect(within(group).getAllByRole("article").map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Categorise headlamp",
+      "Assign category “Tools”",
+    ]);
+    // The other "Accessories" is another category. It is not put in this group.
+    expect(screen.getAllByRole("region", { name: / group$/ })).toHaveLength(1);
+    expect(within(group).queryByText("Categorise vise")).toBeNull();
+    expect(screen.getByText("Categorise vise")).toBeVisible();
+
+    await userEvent.click(within(group).getByRole("button", { name: "Apply group (2)" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/bulk-accept",
+        {
+          suggestion_ids: ["headlamp", "suggestion-category"],
+          edits: { "suggestion-category": { category_id: "camping-accessories" } },
+        },
       ),
     );
   });

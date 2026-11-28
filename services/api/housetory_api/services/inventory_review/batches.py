@@ -17,7 +17,7 @@ from ...models import (
 )
 from ...schemas.inventory_review import ReviewRunRequest
 from ..serializers import item_load_options
-from . import _request_fingerprint, _run_out, coverage, run_review
+from . import _request_fingerprint, _run_out, coverage, grouping, run_review
 from .candidates import unanswered_note
 from .scope import MAX_AI_ITEMS, _normalized, _Scope, _scope_conditions
 
@@ -212,6 +212,8 @@ def advance(
         comparison_scope=comparisons,
         local_checks=not retry,
         ai_inference=ai_inference,
+        # Every batch sees the whole selected scope, and nothing outside it.
+        context_conditions=conditions,
     )
     db.expire_all()
     if run.include_ai and progress["ai_route"] != _assistant_route(db, household_id)[1]:
@@ -402,7 +404,11 @@ def advance_detached(
                 )
 
             def replay(system, prompt, *, config):
-                if (system, prompt, config) != (request.system, request.prompt, request.config):
+                if (system, grouping.answer_inputs(prompt), config) != (
+                    request.system,
+                    grouping.answer_inputs(request.prompt),
+                    request.config,
+                ):
                     raise ApiError(
                         409,
                         "review_inputs_changed",

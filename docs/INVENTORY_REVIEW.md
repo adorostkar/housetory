@@ -124,8 +124,10 @@ supported.
   would duplicate that category suggestion.
 - The confirmation dialog shows the reviewed scope and explains that one bounded
   request sends only item names, descriptions, brand/model, current category/tag names
-  and existing household category/tag vocabularies. It does not send photos, locations,
-  receipts, loans, prices, private notes, borrower data or other households.
+  and existing household category/tag vocabularies, plus the scope context described
+  under [Shared categories for related items](#shared-categories-for-related-items).
+  It does not send photos, locations, receipts, loans, prices, private notes, borrower
+  data or other households.
 - Opening Review never calls AI. The provider may charge usage/cost.
 - Model output is schema-validated, with at most one category and three practical
   use/activity tags per item. Existing taxonomy is selected by household-owned ID; a
@@ -140,6 +142,51 @@ supported.
   its provider/model and sent-item count, alongside suggestion counts. No delay is
   simulated.
 - Related-items, moves, merges, quantities and purchase values are never AI actions.
+
+## Shared categories for related items
+
+AI review proposes categories that people can browse by. Related items are grouped
+around a shared purpose: a tent and camp pillows both fit *Camping & Hiking*. A
+category that only repeats one item name is avoided.
+
+- **Reuse first.** The model is asked to use an existing category when one fits. If
+  none fits, it uses a category that was already proposed for the scope. Only then
+  does it propose a new name.
+- **Context across batches.** A review sends at most 40 items per request. So every
+  request also gets a short picture of the rest of the selected scope:
+  - up to 40 categories that items in the scope use, or that wait as proposals for
+    the scope, each with a count and up to 3 example item names;
+  - up to 80 names of other items in the scope that have no category yet.
+
+  A category that was proposed in an earlier batch does not exist yet. A later batch
+  reuses it by name, so a tent in the first batch and camp pillows in the second get
+  the same category.
+- **Only the selected scope.** The context is built from the reviewed scope: the
+  household, property, room, container or the selected items. Items outside the scope,
+  and proposals that wait for them, are never part of it.
+- **Category lists.** A request lists at most 200 household categories. The ones the
+  selected scope uses come first and the rest are filled in by name, so a category
+  that the context points at is always one the answer may use. An existing category
+  is known by its id, because two categories under different parents can have the
+  same name. A category that does not exist yet is known by its name.
+- **Scheduled review is unchanged.** The consent for scheduled AI covers the reviewed
+  items and the household category and tag lists. A scheduled request sends no scope
+  context: no proposed category names, no counts and no names of other items. Giving
+  schedules this context would need a new consent from the owner.
+- **Decisions during a request.** The context is background. A person can apply or
+  skip another suggestion while a request is out; the answer for the batch is still
+  used.
+- **Shown together.** In the queue, waiting proposals that lead to the same category
+  are listed together under the category name. A category under another one is shown
+  with its parents (*Camping / Accessories*). A proposal with a kept **Edit first**
+  choice goes with the category that was chosen. Each proposal keeps its own **Apply**
+  and **Skip**. **Apply group (n)** applies the proposals shown in the group. A new
+  category is created once, when the first of them is applied.
+- **Nothing changes without approval.** Analysis never creates a category and never
+  changes an item. A group is applied only when a person presses **Apply group**, and
+  each applied change can be undone by itself.
+- This change raised the AI coverage version. The next AI review looks again at items
+  that still miss a category or tags, so older narrow proposals can be replaced.
 
 ## Scheduled review
 
@@ -230,7 +277,7 @@ clear disabled, not-configured, consent-needed and attention states.
 - `GET /inventory-review/summary`
 - `GET /inventory-review/schedule` (owner)
 - `PUT /inventory-review/schedule` (owner)
-- `GET /inventory-review/suggestions`
+- `GET /inventory-review/suggestions` (waiting proposals for one category are adjacent)
 - `GET /inventory-review/scope-items`
 - `POST /inventory-review/runs`
 - `POST /inventory-review/suggestions/{id}/accept`
