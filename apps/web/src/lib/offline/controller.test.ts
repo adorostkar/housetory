@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { UNAUTHORIZED_EVENT, api } from "@/lib/api";
 import * as store from "@/lib/offline/copy-store";
 import {
   BACK_ONLINE_EVENT,
@@ -10,11 +10,13 @@ import {
   enableOfflineCopy,
   getOfflineStatus,
   offlineSessionChanged,
+  removeOfflineCopyOnSignOut,
   resetOfflineForTests,
   signOutOffline,
   startOffline,
   syncOfflineCopy,
 } from "@/lib/offline/controller";
+import * as deviceCache from "@/lib/offline/device-cache";
 import { TEST_SESSION, testCopy } from "@/lib/offline/test-copy";
 import type { ItemSummaryList, OfflineCopy, SessionState } from "@/lib/types";
 
@@ -41,6 +43,14 @@ vi.mock("@/lib/offline/device-cache", () => ({
 }));
 
 const NETWORK_DOWN = () => Promise.reject(new TypeError("Failed to fetch"));
+/** What nginx answers for the API while the API behind it is down. */
+const BAD_GATEWAY = () =>
+  Promise.resolve(
+    new Response("<html><body><h1>502 Bad Gateway</h1></body></html>", {
+      status: 502,
+      headers: { "Content-Type": "text/html" },
+    }),
+  );
 
 function json(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -185,6 +195,99 @@ describe("when the server cannot be reached", () => {
   });
 });
 
+describe("when the proxy in front of the API says the API is not there", () => {
+  it("answers reads from the copy, refuses changes, and comes back", async () => {
+    deviceWithCopy();
+    let apiDown = false;
+    stubFetch((url) => {
+      if (apiDown) return BAD_GATEWAY();
+      return Promise.resolve(
+        url.endsWith("/items") ? json({ items: [], total: 0, limit: 30, offset: 0 }) : json({}),
+      );
+    });
+    startOffline();
+    await expect(checkConnection()).resolves.toBe(true);
+
+    // The API stops while the app is open. nginx itself still answers.
+    apiDown = true;
+    const list = await api.get<ItemSummaryList>("/items?sort=name_asc");
+    expect(list.items.map((item) => item.name)).toEqual(["Axe", "Cordless drill", "Kettle"]);
+    expect(getOfflineStatus().online).toBe(false);
+    await expect(api.get<SessionState>("/auth/session")).resolves.toMatchObject({
+      authenticated: true,
+    });
+    await expect(api.post("/items", { name: "Lamp" })).rejects.toMatchObject({
+      code: "offline_read_only",
+    });
+
+    apiDown = false;
+    await expect(checkConnection()).resolves.toBe(true);
+    await expect(api.get<ItemSummaryList>("/items")).resolves.toMatchObject({ total: 0 });
+  });
+
+  it("does not answer a change from the copy, and keeps the 502 for the caller", async () => {
+    deviceWithCopy();
+    let apiDown = false;
+    stubFetch(() => (apiDown ? BAD_GATEWAY() : Promise.resolve(json({}))));
+    startOffline();
+    await checkConnection();
+    apiDown = true;
+    await expect(api.post("/items", { name: "Lamp" })).rejects.toMatchObject({ status: 502 });
+    expect(getOfflineStatus().online).toBe(false);
+  });
+
+  it("stays with the server when one request meets 502 but the server answers", async () => {
+    // The API sends 502 itself when a service it asks is down (the manual search).
+    deviceWithCopy();
+    stubFetch((url) =>
+      Promise.resolve(
+        url.endsWith("/health/live")
+          ? json({ status: "ok" })
+          : json({ detail: { code: "manual_search_unavailable" } }, { status: 502 }),
+      ),
+    );
+    startOffline();
+    await expect(api.get("/items")).rejects.toMatchObject({
+      status: 502,
+      code: "manual_search_unavailable",
+    });
+    expect(getOfflineStatus().online).toBe(true);
+  });
+
+  it.each([
+    [401, "unauthenticated"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [500, "internal_error"],
+  ])("leaves a %i answer as it was: the server is there", async (status, code) => {
+    deviceWithCopy();
+    const fetchMock = stubFetch((url) =>
+      Promise.resolve(
+        url.endsWith("/health/live") ? json({ status: "ok" }) : json({ detail: { code } }, { status }),
+      ),
+    );
+    startOffline();
+    await checkConnection();
+    fetchMock.mockClear();
+    const unauthorized = vi.fn();
+    window.addEventListener(UNAUTHORIZED_EVENT, unauthorized);
+    await expect(api.get("/items")).rejects.toMatchObject({ status, code });
+    window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized);
+
+    expect(unauthorized).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+    expect(getOfflineStatus().online).toBe(true);
+    // The copy was not asked, and the server was not asked a second time.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("without a copy a 502 is the error it always was", async () => {
+    const fetchMock = stubFetch(BAD_GATEWAY);
+    startOffline();
+    await expect(api.get("/items")).rejects.toMatchObject({ status: 502, code: "request_failed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("when the server is back", () => {
   it("returns to the server, says so once, and brings the copy up to date", async () => {
     deviceWithCopy();
@@ -259,6 +362,77 @@ describe("who may have a copy on this device", () => {
     expect(getOfflineStatus()).toMatchObject({ allowed: false, info: null });
   });
 
+  describe("after a switch to another household", () => {
+    const cabin = { ...TEST_SESSION.household!, id: "household-2", name: "Cabin" };
+    const inCabin: SessionState = { ...TEST_SESSION, household: cabin };
+    const cabinSnapshot = { ...testCopy().snapshot, household: cabin };
+
+    it.each([
+      ["the server fails", () => Promise.resolve(json({ detail: { code: "internal_error" } }, { status: 500 }))],
+      ["the request is lost", NETWORK_DOWN],
+    ])("removes the copy of the household that was left, also when %s", async (_name, failure) => {
+      deviceWithCopy();
+      let snapshotWorks = false;
+      stubFetch((url) => {
+        if (!url.endsWith("/offline/snapshot")) return Promise.resolve(json({ status: "ok" }));
+        return snapshotWorks
+          ? Promise.resolve(json(cabinSnapshot, { headers: { ETag: '"cabin-1"' } }))
+          : failure();
+      });
+      startOffline();
+      await checkConnection();
+      vi.mocked(deviceCache.deleteDeviceFiles).mockClear();
+
+      // The server confirmed the switch. The new copy cannot be downloaded.
+      offlineSessionChanged(inCabin);
+      await syncOfflineCopy();
+      await vi.waitFor(() => expect(getOfflineStatus().syncing).toBe(false));
+      expect(saved.copy).toBeNull();
+      expect(store.readCopyInfo()).toBeNull();
+      expect(getOfflineStatus()).toMatchObject({ enabled: true, info: null, online: true });
+      expect(getOfflineStatus().syncError).toBeTruthy();
+      // The small photos of the old household go too.
+      expect(deviceCache.deleteDeviceFiles).toHaveBeenCalled();
+
+      // Nothing of the old household is shown when the server goes away now.
+      vi.stubGlobal("fetch", vi.fn(NETWORK_DOWN));
+      await expect(api.get("/items")).rejects.toMatchObject({ code: "network_error" });
+      expect(getOfflineStatus().online).toBe(true);
+
+      // The choice stays: the next contact saves the new household.
+      stubFetch((url) =>
+        Promise.resolve(
+          url.endsWith("/offline/snapshot")
+            ? json(cabinSnapshot, { headers: { ETag: '"cabin-1"' } })
+            : json({ status: "ok" }),
+        ),
+      );
+      snapshotWorks = true;
+      offlineSessionChanged(inCabin);
+      await vi.waitFor(() => expect(saved.copy?.householdId).toBe("household-2"));
+      expect(getOfflineStatus().info).toMatchObject({ householdId: "household-2", householdName: "Cabin" });
+    });
+
+    it("saves the new household when the download works, with nothing of the old one left", async () => {
+      deviceWithCopy();
+      const fetchMock = stubFetch((url) =>
+        Promise.resolve(
+          url.endsWith("/offline/snapshot")
+            ? json(cabinSnapshot, { headers: { ETag: '"cabin-1"' } })
+            : json({ status: "ok" }),
+        ),
+      );
+      startOffline();
+      await checkConnection();
+      offlineSessionChanged(inCabin);
+      await vi.waitFor(() => expect(saved.copy?.householdId).toBe("household-2"));
+      expect(store.readCopyInfo()).toMatchObject({ householdId: "household-2" });
+      // The old copy's version is not offered for a household it does not belong to.
+      const snapshotCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/offline/snapshot"));
+      expect(new Headers(snapshotCall?.[1]?.headers).get("If-None-Match")).toBeNull();
+    });
+  });
+
   it("removes a copy that had no contact with the server for 30 days", async () => {
     deviceWithCopy(testCopy({ savedAt: Date.now() - MAX_COPY_AGE_MS - 1000 }));
     stubFetch(NETWORK_DOWN);
@@ -312,5 +486,110 @@ describe("sign-out without the server", () => {
       ["/api/v1/auth/session", "GET"],
     ]);
     expect(store.signOutPending()).toBe(false);
+  });
+});
+
+describe("sign-out while the copy is being refreshed", () => {
+  const fresh = () => {
+    const snapshot = testCopy().snapshot;
+    snapshot.items = snapshot.items.filter((item) => item.id !== "axe");
+    return snapshot;
+  };
+
+  /** Checks that nothing of the account is left, on the device or in the running app. */
+  async function expectNothingLeft() {
+    expect(saved.copy).toBeNull();
+    expect(store.readCopyInfo()).toBeNull();
+    expect(getOfflineStatus()).toMatchObject({ info: null, syncing: false, photoProgress: null });
+    // Without the server the signed-out app has nothing to answer with.
+    vi.stubGlobal("fetch", vi.fn(NETWORK_DOWN));
+    await expect(api.get("/auth/session")).rejects.toMatchObject({ code: "network_error" });
+    await expect(api.get("/items")).rejects.toMatchObject({ code: "network_error" });
+    expect(getOfflineStatus().online).toBe(true);
+  }
+
+  it("does not bring the copy back when the download ends after the sign-out", async () => {
+    deviceWithCopy();
+    let answerSnapshot: (response: Response) => void = () => undefined;
+    // A download that does not stop when it is told to (the answer is already on its way).
+    stubFetch((url) =>
+      url.endsWith("/offline/snapshot")
+        ? new Promise<Response>((resolve) => {
+            answerSnapshot = resolve;
+          })
+        : Promise.resolve(json({ status: "ok" })),
+    );
+    startOffline();
+    await checkConnection();
+    offlineSessionChanged(TEST_SESSION);
+    const refresh = syncOfflineCopy();
+    await vi.waitFor(() => expect(answerSnapshot).not.toHaveLength(0));
+
+    await removeOfflineCopyOnSignOut();
+    answerSnapshot(json(fresh(), { headers: { ETag: '"v2"' } }));
+    await refresh;
+    await expectNothingLeft();
+  });
+
+  it("does not bring the copy back when the sign-out comes while the new copy is written", async () => {
+    deviceWithCopy();
+    stubFetch((url) =>
+      Promise.resolve(
+        url.endsWith("/offline/snapshot")
+          ? json(fresh(), { headers: { ETag: '"v2"' } })
+          : json({ status: "ok" }),
+      ),
+    );
+    let finishWrite: (() => void) | null = null;
+    vi.mocked(store.writeCopy).mockImplementationOnce(
+      (copy) =>
+        new Promise<void>((resolve) => {
+          // The write was asked for before the sign-out and lands after it.
+          finishWrite = () => {
+            saved.copy = copy;
+            resolve();
+          };
+        }),
+    );
+    startOffline();
+    await checkConnection();
+    offlineSessionChanged(TEST_SESSION);
+    const refresh = syncOfflineCopy();
+    await vi.waitFor(() => expect(finishWrite).not.toBeNull());
+    vi.mocked(deviceCache.saveAppFiles).mockClear();
+    vi.mocked(deviceCache.savePhotos).mockClear();
+
+    await removeOfflineCopyOnSignOut();
+    finishWrite!();
+    await refresh;
+    await vi.waitFor(() => expect(saved.copy).toBeNull());
+    await expectNothingLeft();
+    // And no files of the app or photos are saved for an account that left.
+    expect(deviceCache.saveAppFiles).not.toHaveBeenCalled();
+    expect(deviceCache.savePhotos).not.toHaveBeenCalled();
+  });
+
+  it("does not answer a waiting read from the copy after a sign-out without the server", async () => {
+    deviceWithCopy();
+    stubFetch(NETWORK_DOWN);
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    let finishRead: (() => void) | null = null;
+    vi.mocked(store.readCopy).mockImplementationOnce(() => {
+      const copy = saved.copy;
+      return new Promise((resolve) => {
+        finishRead = () => resolve(copy);
+      });
+    });
+    startOffline();
+    expect(getOfflineStatus().online).toBe(false);
+
+    // The first read has to fetch the copy from the device's storage.
+    const waiting = api.get("/items");
+    await vi.waitFor(() => expect(finishRead).not.toBeNull());
+    await signOutOffline();
+    finishRead!();
+    await expect(waiting).rejects.toMatchObject({ code: "network_error" });
+    expect(saved.copy).toBeNull();
+    expect(getOfflineStatus().info).toBeNull();
   });
 });

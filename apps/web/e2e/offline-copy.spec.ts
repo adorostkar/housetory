@@ -207,6 +207,39 @@ test("the server goes away while a form is open: the text stays and saves when i
   await turnOff(page);
 });
 
+test("the API is down behind its proxy: a 502 answer is a read from the copy", async ({ page }) => {
+  await needsProductionBuild(page);
+  await turnOn(page);
+  await page.goto("/rooms");
+  const room = page.locator("main").getByRole("link", { name: new RegExp(ROOM) }).first();
+  await expect(room).toBeVisible();
+  await expect(banner(page)).toHaveCount(0);
+
+  // The app itself still loads. For the API, nginx answers that nothing is there.
+  const changesSent: string[] = [];
+  await page.route("**/api/**", (route) => {
+    if (route.request().method() !== "GET") changesSent.push(route.request().url());
+    return route.fulfill({
+      status: 502,
+      contentType: "text/html",
+      body: "<html><body><center><h1>502 Bad Gateway</h1></center></body></html>",
+    });
+  });
+
+  // A read the open app makes now: this room was not opened before.
+  await room.click();
+  await expect(page.locator("main").getByText(LAMP).first()).toBeVisible();
+  await expect(banner(page)).toContainText("Offline. You see your copy");
+  await expect(page.getByRole("button", { name: "Add items" }).first()).toBeDisabled();
+  expect(changesSent).toEqual([]);
+
+  await page.unroute("**/api/**");
+  await banner(page).first().getByRole("button", { name: "Try again" }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add items" }).first()).toBeEnabled();
+  await turnOff(page);
+});
+
 test("sign-out removes the copy from the device", async ({ browser, baseURL }) => {
   // A session of its own, so the sign-out does not end the one the other files use.
   const context = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });

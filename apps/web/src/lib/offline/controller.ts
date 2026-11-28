@@ -131,6 +131,15 @@ let retryTimer: number | null = null;
 let writeTimer: number | null = null;
 let signOutWaiting = false;
 let signOutRun: Promise<void> | null = null;
+/**
+ * Counts every removal of the copy. Work that began before a removal (a read,
+ * a download, a write) must not bring the copy back, in memory or on the device.
+ */
+let removals = 0;
+/** The removals still running. A new copy is not written before they end. */
+let removing: Promise<unknown> = Promise.resolve();
+
+const UNREACHABLE = "The server could not be reached. The copy was not updated.";
 
 function expired(info: OfflineCopyInfo): boolean {
   return Date.now() - info.savedAt > MAX_COPY_AGE_MS;
@@ -139,7 +148,13 @@ function expired(info: OfflineCopyInfo): boolean {
 async function loadCopy(): Promise<OfflineCopy | null> {
   const info = status.info;
   if (!info) return null;
-  if (!copyInMemory) copyInMemory = await readCopy();
+  if (!copyInMemory) {
+    const before = removals;
+    const stored = await readCopy();
+    // Removed while it was being read: it stays out of memory.
+    if (before !== removals) return null;
+    copyInMemory = stored;
+  }
   if (
     copyInMemory &&
     copyInMemory.userId === info.userId &&
@@ -225,6 +240,7 @@ export function checkConnection(): Promise<boolean> {
 
 /** Removes the copy and its files from this device. The choice to keep one stays. */
 async function removeCopy(): Promise<void> {
+  removals += 1;
   syncAbort?.abort();
   copyInMemory = null;
   writeCopyInfo(null);
@@ -232,7 +248,12 @@ async function removeCopy(): Promise<void> {
   // With nothing left to show, the app goes back to asking the server.
   update({ info: null, photoProgress: null, syncError: null, syncing: false, online: true });
   tellWorker();
-  await Promise.all([deleteCopy(), deleteDeviceFiles()]).catch(() => undefined);
+  const run = Promise.all([deleteCopy(), deleteDeviceFiles()]).then(
+    () => undefined,
+    () => undefined,
+  );
+  removing = Promise.all([removing, run]);
+  await run;
 }
 
 /** Ends the session on the server after a sign-out that the server did not hear of. */
@@ -281,15 +302,17 @@ const gate: OfflineGate = {
     const copy = await loadCopy();
     if (!copy) {
       // The browser dropped the copy. There is nothing to show but the server.
-      await removeCopy();
+      // (When the copy was removed while it was read, that removal did the work.)
+      if (status.info) await removeCopy();
       return undefined;
     }
     return { data: answerOffline(copy, path) };
   },
-  async onNetworkFailure(method, path) {
+  async onUnreachable(method, path) {
     if (!status.info) return undefined;
     // One failed request is not proof. Something on the device may have blocked
-    // it. The copy is used only when the server itself does not answer.
+    // it, and a 502 can be the API's own answer. The copy is used only when the
+    // server itself does not answer a direct question.
     if (status.online && (await checkConnection())) return undefined;
     if (status.online || method !== "GET") return undefined;
     const copy = await loadCopy();
@@ -337,11 +360,18 @@ function storedSession(state: SessionState, snapshot: OfflineSnapshot): SessionS
 }
 
 async function runSync(): Promise<void> {
+  // A copy that is being removed is gone from the device before a new one is written.
+  let waited: Promise<unknown>;
+  do {
+    waited = removing;
+    await waited;
+  } while (waited !== removing);
   const state = session;
   const preference = readPreference();
   if (!state?.user || !state.household || !preference || !status.enabled || !status.online) return;
   const abort = new AbortController();
   syncAbort = abort;
+  const started = removals;
   dirty = false;
   update({ syncing: true, syncError: null });
   try {
@@ -379,11 +409,21 @@ async function runSync(): Promise<void> {
       return;
     } else if (response.status === 401) {
       return;
+    } else if (response.status >= 502 && response.status <= 504) {
+      // A proxy answered for an API that is not there. The connection check decides what is shown.
+      void checkConnection();
+      throw new Error(UNREACHABLE);
     } else {
       throw new Error("The server could not prepare the offline copy. Try again later.");
     }
     if (abort.signal.aborted) return;
     await writeCopy(copy);
+    if (started !== removals) {
+      // Signed out or turned off while the copy was being written. On the device
+      // the write may have come after the removal, so it is removed once more.
+      await deleteCopy();
+      return;
+    }
     copyInMemory = copy;
     const info: OfflineCopyInfo = {
       userId: copy.userId,
@@ -394,24 +434,28 @@ async function runSync(): Promise<void> {
     };
     writeCopyInfo(info);
     update({ info, syncing: false });
+    // Stopped from here on (the server went away, or the copy was removed): the
+    // files are saved by the next run, and nothing is saved for a copy that is gone.
+    if (abort.signal.aborted) return;
 
     await saveAppFiles(abort.signal);
+    if (abort.signal.aborted) return;
     update({ appReady: workerInCharge() });
     tellWorker();
     if (preference.photos) {
-      await savePhotos(photoPlan(copy.snapshot), abort.signal, (done, total) =>
-        update({ photoProgress: { saved: done, total } }),
-      );
+      await savePhotos(photoPlan(copy.snapshot), abort.signal, (done, total) => {
+        if (!abort.signal.aborted) update({ photoProgress: { saved: done, total } });
+      });
     } else {
       await deletePhotos();
-      update({ photoProgress: null });
+      if (!abort.signal.aborted) update({ photoProgress: null });
     }
   } catch (error) {
     if (abort.signal.aborted) return;
     if (error instanceof TypeError) {
       // The network failed, not the copy. The connection check decides what is shown.
       void checkConnection();
-      update({ syncError: "The server could not be reached. The copy was not updated." });
+      update({ syncError: UNREACHABLE });
     } else {
       update({
         syncError:
@@ -462,12 +506,14 @@ export function offlineSessionChanged(state: SessionState) {
     return;
   }
   if (!mine || !allowed || !state.household) return;
-  if (
-    !info ||
-    info.householdId !== state.household.id ||
-    Date.now() - info.savedAt > FRESH_MS ||
-    dirty
-  ) {
+  if (info && info.householdId !== state.household.id) {
+    // The server says another household is open now. The copy of the one that was
+    // left goes at once, whether or not the new one can be downloaded.
+    void removeCopy();
+    void syncOfflineCopy();
+    return;
+  }
+  if (!info || Date.now() - info.savedAt > FRESH_MS || dirty) {
     void syncOfflineCopy();
   }
 }
@@ -545,6 +591,7 @@ export function startOffline() {
   // Another tab removed the copy (sign-out, turned off): this tab lets go of it too.
   window.addEventListener("storage", () => {
     if (status.info === null || readCopyInfo() !== null) return;
+    removals += 1;
     syncAbort?.abort();
     copyInMemory = null;
     stopRetrying();
@@ -599,6 +646,8 @@ export function resetOfflineForTests() {
   probeRun = null;
   signOutWaiting = false;
   signOutRun = null;
+  removals = 0;
+  removing = Promise.resolve();
   listeners.clear();
   status = {
     supported: false,

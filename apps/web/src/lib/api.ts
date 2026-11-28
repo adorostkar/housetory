@@ -23,8 +23,11 @@ export function householdScopedQueryHash(queryKey: readonly unknown[]) {
 export interface OfflineGate {
   /** Answers a request from the copy, or returns nothing to let it reach the server. */
   intercept(method: string, path: string): Promise<{ data: unknown } | undefined>;
-  /** The network failed. May answer from the copy instead. */
-  onNetworkFailure(method: string, path: string): Promise<{ data: unknown } | undefined>;
+  /**
+   * The request did not get an answer from the API: the network failed, or a
+   * proxy answered in its place. May answer from the copy instead.
+   */
+  onUnreachable(method: string, path: string): Promise<{ data: unknown } | undefined>;
   /** Lets a request that hangs be given up for the copy. */
   watch(method: string): { offline: Promise<void>; done(): void } | null;
   onResponse(method: string, path: string, ok: boolean): void;
@@ -82,6 +85,15 @@ async function parseError(response: Response): Promise<ApiError> {
     detail?.message ?? "Something went wrong. Please try again.",
     detail?.fields,
   );
+}
+
+/**
+ * What a proxy in front of the API (nginx) answers by itself when the API is
+ * down (502), not ready (503) or silent (504). The API can send these too, so
+ * the offline gate asks the server directly before it believes them.
+ */
+function mayBeProxyWithoutApi(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
 }
 
 const NETWORK_ERROR_MESSAGE =
@@ -142,7 +154,7 @@ async function send(
     if (rest.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw error;
     }
-    const fromCopy = await offlineGate?.onNetworkFailure(method, path);
+    const fromCopy = await offlineGate?.onUnreachable(method, path);
     if (fromCopy) return fromCopy;
     throw new ApiError(0, "network_error", NETWORK_ERROR_MESSAGE);
   } finally {
@@ -150,6 +162,12 @@ async function send(
     rest.signal?.removeEventListener("abort", onCallerAbort);
   }
 
+  if (offlineGate && mayBeProxyWithoutApi(response.status)) {
+    // Every other status, 401 and 403 too, is the server's own answer and is
+    // handled below as always.
+    const fromCopy = await offlineGate.onUnreachable(method, path);
+    if (fromCopy) return fromCopy;
+  }
   offlineGate?.onResponse(method, path, response.ok);
   if (!response.ok) {
     const error = await parseError(response);

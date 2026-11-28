@@ -40,8 +40,10 @@ It is **off** until a person turns it on, and it is for **one device** only.
 | One small photo for each item (can be turned off) | History of an item or a place |
 | The app itself (its code) | The assistant, stocktake, review, imports, labels |
 
-The copy holds **one household**: the one that is open. After a switch to
-another household, the copy is replaced when the device next has a connection.
+The copy holds **one household**: the one that is open. When the server says
+another household is open now, the copy of the household that was left is
+removed at once. The copy of the new one is saved after that. If it cannot be
+downloaded, the device has no copy until the download works.
 
 ## Who may keep a copy
 
@@ -65,6 +67,8 @@ The server checks this each time a device asks for a copy.
   is removed when the device next reaches the server.
 - The owner no longer allows a copy for this role. Same: at the next contact.
 - Another account signs in on the device.
+- The person switches to another household (the old copy goes; a new one is
+  saved for the new household).
 - **30 days** pass without contact with the server.
 
 After sign-out the *choice* stays on the device (not the data). When the same
@@ -126,9 +130,15 @@ person signs in again, a new copy is saved by itself.
 | `device-cache.ts` | The app's code and the small photos in Cache Storage. |
 
 - Every request goes through `lib/api.ts`. While the server answers, nothing
-  is different. When a request fails because the network failed, and a copy
-  exists, the app switches to the copy. Reads are answered from it. Changes
-  are refused with "You are offline. Changes need a connection…".
+  is different. When a request gets no answer from the API, and a copy exists,
+  the app asks the server directly (see the next point). If that fails too,
+  the app switches to the copy. Reads are answered from it. Changes are
+  refused with "You are offline. Changes need a connection…".
+- "No answer from the API" is one of two things. The network failed. Or nginx
+  answered in the API's place with `502`, `503` or `504`: this is what a
+  person gets when the web container runs and the API container does not.
+  Every other answer is the server's own and is handled as always. A `401`
+  still ends the session and a `403` is still a refusal.
 - The device can be "online" and the server still out of reach (not at home,
   VPN off). So the app does not trust the browser's online flag alone. It asks
   `GET /api/v1/health/live` with a short time limit: when it starts with a
@@ -141,6 +151,9 @@ person signs in again, a new copy is saved by itself.
   server does not answer within 3 seconds. It gives the saved small photo when
   a picture cannot be loaded. It never writes API answers to a cache; the page
   saves the copy itself, and only after the person turned it on.
+- Removing the copy wins over everything that is still running. A download, a
+  write or a read that began before the copy was removed (sign-out, turned
+  off, another household) cannot bring it back, in memory or on the device.
 
 ## How it was checked
 
@@ -165,6 +178,8 @@ Done on 28 Nov 2026.
 | The API client answers from the copy; pages are not changed | Every page that reads items, rooms and places works without its own offline code | The filters and the search of the server are written a second time in `resolver.ts`. Tests compare them on a small household |
 | "Offline" means the server does not answer, not what the browser says | The server is in the home. A phone on mobile data is "online" and still cannot reach it | A small health request, and up to about 3.5 seconds of waiting when the server hangs |
 | A failed request alone does not switch to the copy | Something on the device can block one request | One extra health request when a request fails |
+| A `502`, `503` or `504` answer counts as "no answer", after the same health request | nginx sends these when the API container is down. The API sends `502` itself in one place (manual search), so the status alone is not proof | When the API restarts, the app shows the copy for some seconds and then says "Back online" |
+| A household switch removes the old copy before the new one is there | Offline, a person must never see household A while the app says B is open | If the download fails right after a switch, the device has no copy at all for a while |
 | One household in the copy | Simple, and less private data on the device | No switch to another household offline |
 | Small photos (480 px), main photo only | The stored "thumbnails" are up to 1600 px. A few hundred of them are too much for mobile data | Other photos of an item show a grey box offline. The server makes the small photo on request (some CPU) |
 | Copy removed at sign-out, by policy, and after 30 days without contact | 30 days is the default life of a session on the server | A person who is offline for more than 30 days loses the copy |
@@ -277,6 +292,42 @@ not part of this work and was not changed.
   app could not be opened without the server, and nothing said so. The page
   now asks the worker to take it, and Settings says when the app itself is
   not saved yet.
+
+### After the review of the first version
+
+A review of commit `3e81d08` reported three faults. Each was reproduced first
+(the new tests failed on that commit), then fixed.
+
+| Report | What was true | Fix |
+| --- | --- | --- |
+| nginx answers `502` when the API is down, and reads do not use the copy | True for a list opened in the running app: it showed an error. A fresh start already used the copy, because the health check ran first | `502` to `504` now ask the health check and then use the copy. Photos too, in the service worker |
+| After a household switch the old copy stays when the new download fails | True. Offline, the app would show the household that was left | The old copy is removed as soon as the server confirms the switch |
+| A sign-out during a refresh can bring the copy back | True in two windows: while the new copy was being written, and while the copy was being read for a request. A download that ended after the sign-out was already stopped | Every removal is counted. Work that began before a removal stops, and a write that came last is removed again |
+
+Checks for these, on the fixed build:
+
+| Check | Result |
+| --- | --- |
+| New unit tests in `controller.test.ts` (14) | 6 failed on `3e81d08`, all pass now |
+| New end-to-end test (nginx `502` by a route in the browser) | failed on `3e81d08`, passes now; the file is 4 of 4 |
+| Real stack, API container stopped, nginx running (Chrome, phone size) | 3 of 7 steps on `3e81d08`, 7 of 7 now |
+| Real browser storage: switch with a failing download, switch back, sign-out during a held download | 5 of 5 |
+| The 22 older steps, Chrome at phone size, fresh data | 22 of 22 |
+| Mobile Safari, iPhone 17e simulator, iOS 27.0: the 21 older steps and two new ones (API stopped, API back) | 23 of 23 |
+| All web unit tests, type check, production build | 717 pass, clean |
+
+The server code did not change, so its tests were not run again. The 22 steps
+were first run on the database the other checks had used. Four steps failed
+there, because they expect 48 items and one household. On fresh data all pass.
+
+With the API container stopped, nginx does not answer for up to 10 seconds
+(it still tries the old address) and then answers `502` in a few
+milliseconds. Both cases end in the copy: the first by the 5-second rule for
+slow reads, the second by the new rule.
+
+The write window of the third report is too short to hit by hand. It is
+covered by a unit test that holds the write open; the browser check covers
+the held download.
 
 ### What these checks are not
 

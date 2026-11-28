@@ -178,7 +178,9 @@ async function photo(request, url) {
   };
   if (!offline.online) return saved();
   try {
-    return await withTimeout(fetch(request), PHOTO_WAIT_MS);
+    const response = await withTimeout(fetch(request), PHOTO_WAIT_MS);
+    // 502 to 504: the proxy in front of the API answered for an API that is not there.
+    return response.status >= 502 && response.status <= 504 ? saved() : response;
   } catch {
     return saved();
   }
