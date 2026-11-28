@@ -10,9 +10,11 @@ import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
 import { captureInProgress, type CaptureReview } from "@/lib/assistant-task-events";
 import {
   getOfflineStatus,
+  offlineSessionChanged,
   removeOfflineCopyOnSignOut,
   signOutOffline,
   useOfflineStatus,
+  whileHouseholdChanges,
 } from "@/lib/offline/controller";
 import { setStoredPropertyId } from "@/lib/property-filter-store";
 import { localDateISO } from "@/lib/utils";
@@ -90,6 +92,9 @@ export function applyHouseholdSession(
 ) {
   const previous = queryClient.getQueryData<SessionState>(queryKeys.session)?.household?.id;
   setActiveHouseholdId(state.household?.id ?? null);
+  // The offline copy hears of the new household now, not one render later: a
+  // download that is still open for the old household must not become the copy.
+  offlineSessionChanged(state);
   void queryClient.cancelQueries();
   queryClient.clear();
   queryClient.setQueryData(queryKeys.session, state);
@@ -315,7 +320,7 @@ export function useCreateHousehold() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: { name: string; property_name?: string }) =>
-      api.post<SessionState>("/households", payload),
+      whileHouseholdChanges(() => api.post<SessionState>("/households", payload)),
     onSuccess: (state) => applyHouseholdSession(queryClient, state),
   });
 }
@@ -324,7 +329,7 @@ export function useSelectHousehold() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (householdId: string) =>
-      api.post<SessionState>(`/households/${householdId}/select`),
+      whileHouseholdChanges(() => api.post<SessionState>(`/households/${householdId}/select`)),
     onSuccess: (state) => applyHouseholdSession(queryClient, state),
   });
 }

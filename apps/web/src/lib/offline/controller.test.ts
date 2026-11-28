@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UNAUTHORIZED_EVENT, api } from "@/lib/api";
+import { ApiError, UNAUTHORIZED_EVENT, api } from "@/lib/api";
 import * as store from "@/lib/offline/copy-store";
 import {
   BACK_ONLINE_EVENT,
@@ -14,7 +14,9 @@ import {
   resetOfflineForTests,
   signOutOffline,
   startOffline,
+  subscribeOffline,
   syncOfflineCopy,
+  whileHouseholdChanges,
 } from "@/lib/offline/controller";
 import * as deviceCache from "@/lib/offline/device-cache";
 import { TEST_SESSION, testCopy } from "@/lib/offline/test-copy";
@@ -411,6 +413,224 @@ describe("who may have a copy on this device", () => {
       offlineSessionChanged(inCabin);
       await vi.waitFor(() => expect(saved.copy?.householdId).toBe("household-2"));
       expect(getOfflineStatus().info).toMatchObject({ householdId: "household-2", householdName: "Cabin" });
+    });
+
+    /**
+     * Watches everything that would make an inventory the copy of this device:
+     * the record on the device, the facts beside it, and what the app shows.
+     */
+    function watchCopy() {
+      const shown: string[] = [];
+      const unsubscribe = subscribeOffline(() => {
+        const info = getOfflineStatus().info;
+        if (info) shown.push(info.householdName);
+      });
+      const kept: string[] = [];
+      const realSetItem = Storage.prototype.setItem;
+      const setItem = vi
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(function (this: Storage, key: string, value: string) {
+          if (key === "housetory-offline-copy") {
+            const info = (JSON.parse(value) as { info?: { householdName: string } | null }).info;
+            if (info) kept.push(info.householdName);
+          }
+          realSetItem.call(this, key, value);
+        });
+      vi.mocked(store.writeCopy).mockClear();
+      return {
+        shown,
+        kept,
+        written: () =>
+          vi.mocked(store.writeCopy).mock.calls.map(([copy]) => copy.snapshot.household.name),
+        stop() {
+          unsubscribe();
+          setItem.mockRestore();
+        },
+      };
+    }
+
+    /** Downloads that do not stop when they are told to: the answer is already on its way. */
+    function heldDownloads() {
+      const answers: Array<(response: Response) => void> = [];
+      stubFetch((url) =>
+        url.endsWith("/offline/snapshot")
+          ? new Promise<Response>((resolve) => {
+              answers.push(resolve);
+            })
+          : Promise.resolve(json({ status: "ok" })),
+      );
+      return answers;
+    }
+
+    async function expectNoCopyAtAll(watch: ReturnType<typeof watchCopy>) {
+      watch.stop();
+      // Never the copy, not even for a moment: not shown, not written, not noted.
+      expect(watch.shown).toEqual([]);
+      expect(watch.written()).toEqual([]);
+      expect(watch.kept).toEqual([]);
+      expect(saved.copy).toBeNull();
+      expect(store.readCopyInfo()).toBeNull();
+      expect(getOfflineStatus()).toMatchObject({ info: null, syncing: false });
+      // And nothing is held in memory: without the server there is nothing to answer with.
+      vi.stubGlobal("fetch", vi.fn(NETWORK_DOWN));
+      await expect(api.get("/auth/session")).rejects.toMatchObject({ code: "network_error" });
+      await expect(api.get("/items")).rejects.toMatchObject({ code: "network_error" });
+      expect(getOfflineStatus().online).toBe(true);
+    }
+
+    it("discards a first download that was still open when the switch was confirmed", async () => {
+      // The person turned the copy on. Nothing was ever saved on this device.
+      store.writePreference({ userId: TEST_SESSION.user!.id, photos: false });
+      const answers = heldDownloads();
+      startOffline();
+      const watch = watchCopy();
+
+      offlineSessionChanged(TEST_SESSION);
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
+
+      // The server confirms the switch while the first download is still open.
+      offlineSessionChanged(inCabin);
+      // Then the old download ends, with the inventory of the household that was left ...
+      answers[0]!(json(testCopy().snapshot, { headers: { ETag: '"v1"' } }));
+      // ... and the download for the new household fails.
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      answers[1]!(json({ detail: { code: "internal_error" } }, { status: 500 }));
+      await vi.waitFor(() => expect(getOfflineStatus().syncError).toBeTruthy());
+
+      expect(getOfflineStatus().enabled).toBe(true);
+      await expectNoCopyAtAll(watch);
+    });
+
+    it("holds a first download back from the moment the switch is asked for", async () => {
+      store.writePreference({ userId: TEST_SESSION.user!.id, photos: false });
+      const answers = heldDownloads();
+      startOffline();
+      const watch = watchCopy();
+      offlineSessionChanged(TEST_SESSION);
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
+
+      // The switch is sent. Its answer is not here yet.
+      let confirm: (state: SessionState) => void = () => undefined;
+      const switching = whileHouseholdChanges(
+        () =>
+          new Promise<SessionState>((resolve) => {
+            confirm = resolve;
+          }),
+      );
+      // The old download ends before the app knows what the server answered.
+      answers[0]!(json(testCopy().snapshot, { headers: { ETag: '"v1"' } }));
+      await vi.waitFor(() => expect(getOfflineStatus().syncing).toBe(false));
+      expect(watch.shown).toEqual([]);
+      expect(watch.written()).toEqual([]);
+
+      confirm(inCabin);
+      offlineSessionChanged(await switching);
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      answers[1]!(json({ detail: { code: "internal_error" } }, { status: 500 }));
+      await vi.waitFor(() => expect(getOfflineStatus().syncError).toBeTruthy());
+      await expectNoCopyAtAll(watch);
+    });
+
+    it("downloads the same household again when the switch is refused", async () => {
+      store.writePreference({ userId: TEST_SESSION.user!.id, photos: false });
+      const answers = heldDownloads();
+      startOffline();
+      offlineSessionChanged(TEST_SESSION);
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
+
+      await expect(
+        whileHouseholdChanges(() => Promise.reject(new ApiError(403, "forbidden", "Not a member."))),
+      ).rejects.toMatchObject({ status: 403 });
+      // The download that was open when the switch was sent is not used ...
+      answers[0]!(json(testCopy().snapshot, { headers: { ETag: '"v1"' } }));
+      // ... a new one for the household that stays open is.
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      expect(saved.copy).toBeNull();
+      answers[1]!(json(testCopy().snapshot, { headers: { ETag: '"v1"' } }));
+      await vi.waitFor(() => expect(saved.copy?.householdId).toBe("household-1"));
+      expect(getOfflineStatus().info).toMatchObject({ householdId: "household-1" });
+    });
+
+    it("removes a first copy whose write was under way when the switch was confirmed", async () => {
+      store.writePreference({ userId: TEST_SESSION.user!.id, photos: false });
+      let downloads = 0;
+      stubFetch((url) => {
+        if (!url.endsWith("/offline/snapshot")) return Promise.resolve(json({ status: "ok" }));
+        downloads += 1;
+        return Promise.resolve(
+          downloads === 1
+            ? json(testCopy().snapshot, { headers: { ETag: '"v1"' } })
+            : json({ detail: { code: "internal_error" } }, { status: 500 }),
+        );
+      });
+      startOffline();
+      const watch = watchCopy();
+      let finishWrite: (() => void) | null = null;
+      vi.mocked(store.writeCopy).mockImplementationOnce(
+        (copy) =>
+          new Promise<void>((resolve) => {
+            finishWrite = () => {
+              saved.copy = copy;
+              resolve();
+            };
+          }),
+      );
+      offlineSessionChanged(TEST_SESSION);
+      await vi.waitFor(() => expect(finishWrite).not.toBeNull());
+
+      offlineSessionChanged(inCabin);
+      finishWrite!();
+      await vi.waitFor(() => expect(getOfflineStatus().syncError).toBeTruthy());
+      await vi.waitFor(() => expect(saved.copy).toBeNull());
+      watch.stop();
+      // The write had begun before the server confirmed anything. It is taken
+      // back, and it never became the copy the app knows of.
+      expect(watch.shown).toEqual([]);
+      expect(watch.kept).toEqual([]);
+      expect(store.readCopyInfo()).toBeNull();
+      expect(getOfflineStatus().info).toBeNull();
+    });
+
+    it("does not save an answer for a household that this app does not have open", async () => {
+      // The household was switched somewhere else. The server already answers for
+      // the new one; this app still shows the old one.
+      store.writePreference({ userId: TEST_SESSION.user!.id, photos: false });
+      stubFetch((url) =>
+        Promise.resolve(
+          url.endsWith("/offline/snapshot")
+            ? json(cabinSnapshot, { headers: { ETag: '"cabin-1"' } })
+            : json({ status: "ok" }),
+        ),
+      );
+      startOffline();
+      const watch = watchCopy();
+      offlineSessionChanged(TEST_SESSION);
+      await syncOfflineCopy();
+      await vi.waitFor(() => expect(getOfflineStatus().syncing).toBe(false));
+      expect(watch.shown).toEqual([]);
+      expect(watch.written()).toEqual([]);
+      expect(saved.copy).toBeNull();
+
+      // The app hears of the switch: now the answer is the open household's.
+      offlineSessionChanged(inCabin);
+      await vi.waitFor(() => expect(saved.copy?.householdId).toBe("household-2"));
+      watch.stop();
+      expect(watch.shown.every((name) => name === "Cabin")).toBe(true);
+    });
+
+    it("discards a first download that was still open when the session ended", async () => {
+      store.writePreference({ userId: TEST_SESSION.user!.id, photos: false });
+      const answers = heldDownloads();
+      startOffline();
+      const watch = watchCopy();
+      offlineSessionChanged(TEST_SESSION);
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
+
+      offlineSessionChanged(signedOut);
+      answers[0]!(json(testCopy().snapshot, { headers: { ETag: '"v1"' } }));
+      await vi.waitFor(() => expect(getOfflineStatus().syncing).toBe(false));
+      await Promise.resolve();
+      await expectNoCopyAtAll(watch);
     });
 
     it("saves the new household when the download works, with nothing of the old one left", async () => {

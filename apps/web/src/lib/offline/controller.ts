@@ -138,6 +138,15 @@ let signOutRun: Promise<void> | null = null;
 let removals = 0;
 /** The removals still running. A new copy is not written before they end. */
 let removing: Promise<unknown> = Promise.resolve();
+/** The account and the household the running download was started for. */
+let syncFor: CopyOwner | null = null;
+/** Requests that open another household and are not answered yet. */
+let householdChanges = 0;
+
+interface CopyOwner {
+  userId: string;
+  householdId: string;
+}
 
 const UNREACHABLE = "The server could not be reached. The copy was not updated.";
 
@@ -369,9 +378,24 @@ async function runSync(): Promise<void> {
   const state = session;
   const preference = readPreference();
   if (!state?.user || !state.household || !preference || !status.enabled || !status.online) return;
+  // Another household is being opened. The session that follows starts the download.
+  if (householdChanges > 0) return;
   const abort = new AbortController();
   syncAbort = abort;
   const started = removals;
+  const owner: CopyOwner = { userId: state.user.id, householdId: state.household.id };
+  syncFor = owner;
+  /**
+   * The download may become the copy of this device only while nothing removed
+   * the copy since it began, no other household is being opened, and it is the
+   * inventory of the account and the household that are open now. A device that
+   * never had a copy is held to the same rule.
+   */
+  const wanted = (copy: OfflineCopy) =>
+    started === removals &&
+    householdChanges === 0 &&
+    session?.user?.id === copy.userId &&
+    session.household?.id === copy.householdId;
   dirty = false;
   update({ syncing: true, syncError: null });
   try {
@@ -417,11 +441,18 @@ async function runSync(): Promise<void> {
       throw new Error("The server could not prepare the offline copy. Try again later.");
     }
     if (abort.signal.aborted) return;
+    if (!wanted(copy)) {
+      // The server answered for a household that this app does not have open
+      // (any more). The next session answer starts a download for the right one.
+      dirty = true;
+      return;
+    }
     await writeCopy(copy);
-    if (started !== removals) {
-      // Signed out or turned off while the copy was being written. On the device
-      // the write may have come after the removal, so it is removed once more.
-      await deleteCopy();
+    if (!wanted(copy)) {
+      // Signed out, turned off or another household opened while the copy was
+      // being written. On the device the write may have come last, so everything
+      // is removed once more.
+      await removeCopy();
       return;
     }
     copyInMemory = copy;
@@ -464,6 +495,7 @@ async function runSync(): Promise<void> {
     }
   } finally {
     if (syncAbort === abort) syncAbort = null;
+    if (syncFor === owner) syncFor = null;
     update({ syncing: false });
   }
 }
@@ -492,29 +524,60 @@ export function offlineSessionChanged(state: SessionState) {
   if (!status.online) return;
   session = state;
   const info = readCopyInfo();
+  // A copy is on this device, or one is being downloaded. A device that never
+  // saved a copy can still have a download open for the account or the
+  // household that was just left, and that download must not become the copy.
+  const making = syncFor;
+  const here = info !== null || status.info !== null || making !== null;
   if (!state.authenticated || !state.user) {
     update({ enabled: false, allowed: false });
-    if (info || status.info) void removeCopy();
+    if (here) void removeCopy();
     return;
   }
   const preference = readPreference();
   const mine = preference?.userId === state.user.id;
   const allowed = Boolean(state.offline_copy_allowed && state.household);
   update({ enabled: mine, photos: mine ? preference.photos : true, allowed });
-  if (info && (info.userId !== state.user.id || !mine || !allowed)) {
-    void removeCopy();
+  if (!mine || !allowed || !state.household) {
+    if (here) void removeCopy();
     return;
   }
-  if (!mine || !allowed || !state.household) return;
-  if (info && info.householdId !== state.household.id) {
+  const open: CopyOwner = { userId: state.user.id, householdId: state.household.id };
+  const foreign = (owner: CopyOwner | null) =>
+    owner !== null && (owner.userId !== open.userId || owner.householdId !== open.householdId);
+  if (foreign(info) || foreign(making)) {
     // The server says another household is open now. The copy of the one that was
-    // left goes at once, whether or not the new one can be downloaded.
+    // left goes at once, and a download still open for it is thrown away, whether
+    // or not the new one can be downloaded.
     void removeCopy();
     void syncOfflineCopy();
     return;
   }
   if (!info || Date.now() - info.savedAt > FRESH_MS || dirty) {
     void syncOfflineCopy();
+  }
+}
+
+/**
+ * Wraps a request that opens another household. From the moment it is sent
+ * until its answer is known, no download may become the copy: a download that
+ * is open was made for the household that is being left.
+ */
+export async function whileHouseholdChanges<T>(change: () => Promise<T>): Promise<T> {
+  householdChanges += 1;
+  syncAbort?.abort();
+  dirty = true;
+  let answered = false;
+  try {
+    const result = await change();
+    answered = true;
+    return result;
+  } finally {
+    householdChanges -= 1;
+    // Answered: the caller passes the new session on, and that starts the
+    // download. Refused or lost: the same household stays open, so its copy is
+    // brought up to date again.
+    if (!answered) void syncOfflineCopy();
   }
 }
 
@@ -648,6 +711,8 @@ export function resetOfflineForTests() {
   signOutRun = null;
   removals = 0;
   removing = Promise.resolve();
+  syncFor = null;
+  householdChanges = 0;
   listeners.clear();
   status = {
     supported: false,

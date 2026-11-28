@@ -154,6 +154,11 @@ person signs in again, a new copy is saved by itself.
 - Removing the copy wins over everything that is still running. A download, a
   write or a read that began before the copy was removed (sign-out, turned
   off, another household) cannot bring it back, in memory or on the device.
+- A download belongs to one account and one household. It becomes the copy
+  only if that account and that household are still the open ones when it
+  ends. This holds for the very first download too, when the device has no
+  copy yet. While a request to open another household is on its way, no
+  download becomes the copy at all.
 
 ## How it was checked
 
@@ -328,6 +333,54 @@ slow reads, the second by the new rule.
 The write window of the third report is too short to hit by hand. It is
 covered by a unit test that holds the write open; the browser check covers
 the held download.
+
+### A second review: a switch during the first download
+
+The fix above looked at the copy that is saved. A device that is still
+downloading its **first** copy has none. So a switch at that moment only
+queued a second download behind the first. The first one then ended and the
+household that was left became the copy. When the second download failed, it
+stayed.
+
+Reproduced on `b58baf3` in a unit test and in a real browser (the first answer
+held back, the switch made in the app, the old answer let through, the new
+download failing): Birch Lane became the copy while the other household was
+open, and without the server the app showed Birch Lane.
+
+What changed:
+
+| Rule | Why |
+| --- | --- |
+| Every download knows the account and the household it was started for. A session answer for another one throws the download away, saved copy or not | The fault itself |
+| Before a download is written, and again after, it must still be the inventory of the open account and household | Also covers a server that already answers for a household this app has not heard of yet |
+| From the moment the app sends a switch until the answer is known, no download becomes the copy | The answer of the server is on its way for a short time. In that time the app does not know yet |
+| The app tells the offline code about the new household at once, not one screen update later | Closes the same kind of gap |
+| A session that ended, or a role that may no longer keep a copy, also throws away a first download | Same fault, other cause |
+
+One thing cannot be prevented: a write that had already begun before the
+server confirmed anything. It is taken back as soon as it ends, and it is
+never shown or noted as the copy.
+
+If the switch is refused, the household that stays open is downloaded again.
+
+| Check | Result |
+| --- | --- |
+| 6 new unit tests in `controller.test.ts` | all fail on `b58baf3` (two of them use a function that did not exist there), all pass now |
+| Real browser, real storage: switch during the first download, old answer delivered after, new download fails | 1 of 6 steps on `b58baf3`, 6 of 6 now, run twice |
+| The older checks on the fixed build: end-to-end file, switch and sign-out, API stopped | 4 of 4, 5 of 5, 7 of 7 |
+| The 22 older steps, Chrome at phone size, fresh data | 22 of 22 |
+| Mobile Safari, iPhone 17e simulator, iOS 27.0, 23 steps | 23 of 23, twice: a second visit, and a first visit |
+| All web unit tests, type check, production build | 723 pass, clean |
+
+About the Mobile Safari runs: two runs that began a few seconds after a new
+simulator's first boot failed at their first step. The service worker was not
+in charge after 20 seconds, and then the check takes the server away. Measured
+on the idle sign-in page of such a simulator, the first start of the worker
+took 48 seconds by itself. A new simulator that was left alone for 90 seconds
+first passed all 23 steps on its first visit. So this is the simulator, busy
+after its first boot, and not this change. In that state the app does what it
+is meant to do: Settings says that the app itself is not saved on the device
+yet.
 
 ### What these checks are not
 
