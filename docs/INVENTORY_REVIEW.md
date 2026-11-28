@@ -124,8 +124,10 @@ supported.
   would duplicate that category suggestion.
 - The confirmation dialog shows the reviewed scope and explains that one bounded
   request sends only item names, descriptions, brand/model, current category/tag names
-  and existing household category/tag vocabularies. It does not send photos, locations,
-  receipts, loans, prices, private notes, borrower data or other households.
+  and existing household category/tag vocabularies, plus the scope context described
+  under [Shared categories for related items](#shared-categories-for-related-items).
+  It does not send photos, locations, receipts, loans, prices, private notes, borrower
+  data or other households.
 - Opening Review never calls AI. The provider may charge usage/cost.
 - Model output is schema-validated, with at most one category and three practical
   use/activity tags per item. Existing taxonomy is selected by household-owned ID; a
@@ -140,6 +142,44 @@ supported.
   its provider/model and sent-item count, alongside suggestion counts. No delay is
   simulated.
 - Related-items, moves, merges, quantities and purchase values are never AI actions.
+
+## Shared categories for related items
+
+AI review proposes categories that people can browse by. Related items are grouped
+around a shared purpose: a tent and camp pillows both fit *Camping & Hiking*. A
+category that only repeats one item name is avoided.
+
+- **Reuse first.** The model is asked to use an existing category when one fits. If
+  none fits, it uses a category that was already proposed for the scope. Only then
+  does it propose a new name.
+- **Context across batches.** A review sends at most 40 items per request. So every
+  request also gets a short picture of the rest of the selected scope:
+  - up to 40 categories that items in the scope use, or that wait as proposals for
+    the scope, each with a count and up to 3 example item names;
+  - up to 80 names of other items in the scope that have no category yet.
+
+  A category that was proposed in an earlier batch does not exist yet. A later batch
+  reuses it by name, so a tent in the first batch and camp pillows in the second get
+  the same category.
+- **Only the selected scope.** The context is built from the reviewed scope: the
+  household, property, room, container or the selected items. Items outside the scope,
+  and proposals that wait for them, are never part of it. The household category and
+  tag lists are sent as before.
+- **Scheduled review.** The consent for scheduled AI covers the reviewed items only.
+  A scheduled request gets category names and counts as context, and no names of
+  other items.
+- **Decisions during a request.** The context is background. A person can apply or
+  skip another suggestion while a request is out; the answer for the batch is still
+  used.
+- **Shown together.** In the queue, waiting proposals for the same category are
+  listed together under the category name. Each proposal keeps its own **Apply** and
+  **Skip**. **Apply group (n)** applies the proposals shown in the group. A new
+  category is created once, when the first of them is applied.
+- **Nothing changes without approval.** Analysis never creates a category and never
+  changes an item. A group is applied only when a person presses **Apply group**, and
+  each applied change can be undone by itself.
+- This change raised the AI coverage version. The next AI review looks again at items
+  that still miss a category or tags, so older narrow proposals can be replaced.
 
 ## Scheduled review
 
@@ -177,7 +217,8 @@ on-demand AI review do **not** enable it. The consent text states that one
 bounded request per run sends at most 40 items needing a category or tags from the
 selected scope to the current Assistant provider. Only names, descriptions, brand/model,
 current category/tag names and existing household category/tag vocabularies are
-included; photos, locations, receipts, loans, prices, private notes, borrower data and
+included, with the names of categories proposed for the scope and a count of items for
+each; names of other items are not included; photos, locations, receipts, loans, prices, private notes, borrower data and
 other households are excluded. It also states that the provider may charge usage or
 cost; Housetory does not invent a cost estimate.
 
@@ -230,7 +271,7 @@ clear disabled, not-configured, consent-needed and attention states.
 - `GET /inventory-review/summary`
 - `GET /inventory-review/schedule` (owner)
 - `PUT /inventory-review/schedule` (owner)
-- `GET /inventory-review/suggestions`
+- `GET /inventory-review/suggestions` (waiting proposals for one category are adjacent)
 - `GET /inventory-review/scope-items`
 - `POST /inventory-review/runs`
 - `POST /inventory-review/suggestions/{id}/accept`

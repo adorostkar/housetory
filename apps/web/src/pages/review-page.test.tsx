@@ -313,6 +313,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
             },
           };
         }
+        if (path.endsWith("/bulk-accept")) {
+          return { applied_count: 2, skipped_count: 0, stale_count: 0, unsupported_count: 0, results: [] };
+        }
         if (path === "/inventory-review/runs") {
           return {
             id: "run-new",
@@ -1193,6 +1196,47 @@ describe("ReviewPage", () => {
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/inventory-review/suggestions/suggestion-organisation/accept",
         {},
+      ),
+    );
+  });
+
+  it("shows proposals for one category together, with single review and a group apply", async () => {
+    const proposal = (id: string, name: string, category: string): ReviewSuggestion => ({
+      ...organisationSuggestion,
+      id,
+      title: `Categorise ${name}`,
+      item_id: `item-${id}`,
+      item: item({ id: `item-${id}`, name }),
+      after: { category_id: null, category_name: category, category_is_new: true, tags: [] },
+      fingerprint: `fingerprint-${id}`,
+    });
+    // The duplicate finding sits between the two related proposals in the list.
+    suggestions = [
+      proposal("tent", "Family tent", "Camping & Hiking"),
+      duplicateSuggestion,
+      proposal("pillows", "Camp pillows", "camping &  hiking"),
+      categorySuggestion,
+    ];
+    renderPage();
+    const group = screen.getByRole("region", { name: "Camping & Hiking group" });
+    expect(within(group).getByRole("heading", { name: "Camping & Hiking (new)" })).toBeVisible();
+    expect(within(group).getAllByRole("article").map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Categorise Family tent",
+      "Categorise Camp pillows",
+    ]);
+    // Each proposal can still be decided by itself.
+    expect(within(group).getAllByRole("button", { name: "Apply changes" })).toHaveLength(2);
+    expect(within(group).getAllByRole("button", { name: "Skip" })).toHaveLength(2);
+    // A category that one suggestion proposes is not a group.
+    expect(screen.queryByRole("region", { name: "Tools group" })).toBeNull();
+    // Showing the group applies nothing.
+    expect(api.post).not.toHaveBeenCalled();
+
+    await userEvent.click(within(group).getByRole("button", { name: "Apply group (2)" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/bulk-accept",
+        { suggestion_ids: ["tent", "pillows"] },
       ),
     );
   });

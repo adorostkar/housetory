@@ -616,7 +616,9 @@ function ScheduleDialog({
                       current category/tag names and existing household category/tag names
                       from the selected scope are sent to{" "}
                       <strong className="font-medium text-foreground/80">{aiLabel}</strong>
-                      {aiModel ? ` (${aiModel})` : ""}. No photos, locations, receipts,
+                      {aiModel ? ` (${aiModel})` : ""}. Category names include the ones
+                      proposed for the scope that still wait in Review, with a count of
+                      items and no other item names. No photos, locations, receipts,
                       prices, loans, private notes, borrower data or other households are
                       sent. The provider may charge usage or cost; Housetory does not
                       estimate it. Consent is tied to this provider, endpoint and model.

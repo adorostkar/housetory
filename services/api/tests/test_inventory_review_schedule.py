@@ -467,6 +467,8 @@ def test_scheduled_ai_uses_one_bounded_provider_request(owner_client, monkeypatc
     finish_job(job_id, result)
     assert result["ai_used"] is True
     assert len(calls) == 1
+    # Scheduled consent covers the 40 reviewed items: no other item is named as context.
+    assert sum(f"Bounded item {index:02d}" in calls[0][0] for index in range(45)) == 40
     with SessionLocal() as db:
         run = db.get(InventoryReviewRun, uuid.UUID(result["run_id"]))
         assert run is not None

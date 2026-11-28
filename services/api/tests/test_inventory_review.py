@@ -2,6 +2,7 @@ import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
@@ -44,6 +45,65 @@ def seed_review_items(client, count):
 
 def sent_items(prompt):
     return json.loads(prompt.split("Items: ", 1)[1].split("\nReturn ", 1)[0])
+
+
+def inventory_context(prompt):
+    prefix = "Inventory context: "
+    line = next((line for line in prompt.splitlines() if line.startswith(prefix)), None)
+    return json.loads(line.removeprefix(prefix)) if line else {}
+
+
+def seed_named_items(client, names):
+    """Uncategorised items that are reviewed in the given order, 40 to a batch."""
+    room = create_room(client, "Gear room")
+    household = client.get("/api/v1/auth/session").json()["household"]["id"]
+    newest = datetime.now(UTC)
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Item(
+                    household_id=uuid.UUID(household),
+                    room_id=uuid.UUID(room["id"]),
+                    name=name,
+                    quantity=1,
+                    updated_at=newest - timedelta(minutes=position),
+                )
+                for position, name in enumerate(names)
+            ]
+        )
+        db.commit()
+    return room
+
+
+def group_related(_system, prompt, **_kwargs):
+    """A model that only groups the pillows when the context offers a proposed category."""
+    proposed = [
+        entry["name"]
+        for entry in inventory_context(prompt).get("categories", [])
+        if entry["id"] is None
+    ]
+    answers = {
+        "Family tent": {
+            "category": {"name": "Camping & Hiking"},
+            "confidence": "high",
+            "reason": "A tent is camping gear.",
+        },
+        "Camp pillows": {
+            "category": {"name": proposed[0] if proposed else "Bedding"},
+            "reason": "Pillows for sleeping outdoors.",
+        },
+    }
+    return {
+        "suggestions": [
+            {
+                "index": record["index"],
+                **answers.get(
+                    record["name"], {"no_category_reason": "The record does not say what it is."}
+                ),
+            }
+            for record in sent_items(prompt)
+        ]
+    }
 
 
 def decline_all(_system, prompt, **_kwargs):
@@ -1756,8 +1816,11 @@ def test_ai_camping_organisation_creates_taxonomy_on_accept_and_undo_restores_ex
     assert run["ai_used"] is True
     assert run["ai_item_count"] == 1
     assert len(prompts) == 1
-    assert "Camp stove" in prompts[0]
-    assert "Already organised lantern" not in prompts[0]
+    # The organised lantern is not sent for review. It only shows how its category is used.
+    assert [record["name"] for record in sent_items(prompts[0])] == ["Camp stove"]
+    assert inventory_context(prompts[0])["categories"][0]["examples"] == [
+        "Already organised lantern"
+    ]
     assert "Private gear locker" not in prompts[0]
     assert "PRIVATE-SERIAL-NOT-FOR-AI" not in prompts[0]
     assert "current_tags" in prompts[0]
@@ -1872,6 +1935,166 @@ def test_organisation_bulk_accept_and_duplicate_ai_indexes(owner_client, monkeyp
     assert undone.status_code == 200, undone.text
     assert undone.json()["status"] == "applied"
     assert {tag["name"] for tag in item_state(client, tent["id"])["tags"]} == {"family"}
+
+
+def test_later_batch_reuses_a_category_proposed_earlier_and_the_group_applies_once(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    # The tent is in the first batch of 40. The pillows are alone in the second.
+    seed_named_items(
+        client,
+        [
+            "Family tent",
+            "Spare lamp",
+            "Spare lamp",
+            *[f"Batch object {index:04}" for index in range(37)],
+            "Camp pillows",
+        ],
+    )
+    contexts = []
+
+    def complete(*args, **kwargs):
+        contexts.append(inventory_context(args[1]))
+        return group_related(*args, **kwargs)
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = run_review(client, include_ai=True).json()
+    assert run["remaining_item_count"] == 1
+    # The first batch already knows what else in the scope has no category.
+    assert contexts[0] == {"other_uncategorised_items": ["Camp pillows"]}
+    run = advance_review(client, run)
+    assert run["status"] == "completed"
+    assert contexts[1]["categories"] == [
+        {"name": "Camping & Hiking", "id": None, "item_count": 1, "examples": ["Family tent"]}
+    ]
+
+    pending = suggestions(client)["items"]
+    # Related proposals are listed together, ahead of the duplicate finding that has a
+    # higher priority than the pillows by themselves.
+    assert [(row["type"], row["item"]["name"]) for row in pending] == [
+        ("organisation", "Family tent"),
+        ("organisation", "Camp pillows"),
+        ("possible_duplicate", "Spare lamp"),
+    ]
+    related = pending[:2]
+    assert {row["after"]["category_name"] for row in related} == {"Camping & Hiking"}
+    with SessionLocal() as db:
+        # Analysis proposes only: the shared category does not exist before approval.
+        assert db.scalar(select(func.count()).select_from(Category)) == 0
+        assert db.scalar(select(func.count()).where(Item.category_id.is_not(None))) == 0
+
+    group = client.post(
+        "/api/v1/inventory-review/suggestions/bulk-accept",
+        json={"suggestion_ids": [row["id"] for row in related]},
+    )
+    assert group.status_code == 200, group.text
+    assert group.json()["applied_count"] == 2
+    categories = [item_state(client, row["item_id"])["category"] for row in related]
+    assert categories[0]["name"] == "Camping & Hiking"
+    assert categories[0]["id"] == categories[1]["id"]
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Category)) == 1
+
+
+def test_a_decision_on_an_earlier_proposal_during_inference_does_not_block_the_batch(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    seed_named_items(
+        client,
+        ["Family tent", *[f"Batch object {index:04}" for index in range(39)], "Camp pillows"],
+    )
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(args[1])
+        if len(calls) == 2:
+            # The request is out. Meanwhile the person skips the tent proposal, which
+            # changes the context but not what this batch was asked.
+            with SessionLocal() as db:
+                proposal = db.scalar(select(InventoryReviewSuggestion))
+                proposal.status = "dismissed"
+                db.commit()
+        return group_related(*args, **kwargs)
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = run_review(client, include_ai=True).json()
+    run = advance_review(client, run)
+    assert (run["status"], run["ai_reviewed_count"]) == ("completed", 41)
+    assert [
+        (row["item"]["name"], row["after"]["category_name"])
+        for row in organisation_suggestions(client)
+    ] == [("Camp pillows", "Camping & Hiking")]
+
+
+def test_ai_context_stays_inside_the_selected_scope(owner_client, configured_ai, monkeypatch):
+    from housetory_api.services import ai
+
+    client = owner_client
+    inside = create_room(client, "Hall")
+    outside = create_room(client, "Boat shed")
+    lighting = create_category(client, "Lighting")
+    tools = create_category(client, "Tools")
+    sorted_tag = create_tag(client, "sorted")
+    tent = create_item(client, "Scoped tent", inside["id"])
+    lantern = create_item(
+        client,
+        "Scoped lantern",
+        inside["id"],
+        category_id=lighting["id"],
+        tag_ids=[sorted_tag["id"]],
+    )
+    create_item(client, "Scoped stool", inside["id"])
+    create_item(client, "Outside kayak", outside["id"])
+    create_item(client, "Outside saw", outside["id"], category_id=tools["id"])
+    prompts = []
+
+    def complete(_system, prompt, **_kwargs):
+        prompts.append(prompt)
+        return {
+            "suggestions": [
+                {"index": record["index"], "category": {"name": "Water sports"}}
+                if record["name"] == "Outside kayak"
+                else {"index": record["index"], "no_category_reason": "Not stated."}
+                for record in sent_items(prompt)
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    # A proposal that waits outside the scopes reviewed next.
+    run_review(client, scope_type="room", scope_id=outside["id"], include_ai=True)
+    assert [row["after"]["category_name"] for row in organisation_suggestions(client)] == [
+        "Water sports"
+    ]
+    lighting_context = {
+        "name": "Lighting",
+        "id": lighting["id"],
+        "item_count": 1,
+        "examples": ["Scoped lantern"],
+    }
+
+    run_review(client, scope_type="items", item_ids=[tent["id"], lantern["id"]], include_ai=True)
+    selected = prompts[1]
+    assert [record["name"] for record in sent_items(selected)] == ["Scoped tent"]
+    # Selected items: the stool is in the same room, but it was not selected.
+    assert inventory_context(selected) == {"categories": [lighting_context]}
+    assert "Scoped stool" not in selected
+
+    run_review(client, scope_type="room", scope_id=inside["id"], include_ai=True)
+    room = prompts[2]
+    assert [record["name"] for record in sent_items(room)] == ["Scoped stool"]
+    assert inventory_context(room) == {
+        "categories": [lighting_context],
+        "other_uncategorised_items": ["Scoped tent"],
+    }
+    for prompt in (selected, room):
+        for outsider in ("Outside kayak", "Outside saw", "Water sports"):
+            assert outsider not in prompt
 
 
 def test_ai_organisation_skips_when_no_eligible_items(owner_client, monkeypatch):

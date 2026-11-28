@@ -117,3 +117,33 @@ export function reviewScopeLabel({
   if (scopeType === "container") return containerLabel ?? "Selected container";
   return `${pluralize(selectedCount, "selected item")}`;
 }
+
+export type SuggestionEntry<T> =
+  | { kind: "single"; suggestion: T }
+  | { kind: "group"; key: string; category: string; suggestions: T[] };
+
+/**
+ * Puts suggestions that propose the same category together. A group takes the place of
+ * its first suggestion. A category that only one suggestion proposes is not a group.
+ */
+export function groupByProposedCategory<T>(
+  suggestions: T[],
+  categoryOf: (suggestion: T) => string | null,
+): SuggestionEntry<T>[] {
+  const keyOf = (suggestion: T) =>
+    categoryOf(suggestion)?.trim().replace(/\s+/g, " ").toLowerCase() || null;
+  const members = new Map<string, T[]>();
+  for (const suggestion of suggestions) {
+    const key = keyOf(suggestion);
+    if (key) members.set(key, [...(members.get(key) ?? []), suggestion]);
+  }
+  const placed = new Set<string>();
+  return suggestions.flatMap((suggestion): SuggestionEntry<T>[] => {
+    const key = keyOf(suggestion);
+    const group = key ? members.get(key) ?? [] : [];
+    if (!key || group.length < 2) return [{ kind: "single", suggestion }];
+    if (placed.has(key)) return [];
+    placed.add(key);
+    return [{ kind: "group", key, category: categoryOf(suggestion)!.trim(), suggestions: group }];
+  });
+}

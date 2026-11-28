@@ -12,7 +12,8 @@ from .scope import _hash
 
 CAPABILITY = "ai_organisation"
 # 2: every uncategorised item gets a category proposal or a recorded reason.
-CAPABILITY_VERSION = 2
+# 3: proposals group related items, with the selected scope as context across batches.
+CAPABILITY_VERSION = 3
 
 
 def item_input(item: Item) -> dict:
